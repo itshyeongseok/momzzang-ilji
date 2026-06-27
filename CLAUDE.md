@@ -10,9 +10,10 @@
 - **과설계 금지.** 요청된 것만. 추상화·설정 옵션은 실제로 두 번째 사용처가 생길 때만.
 
 ## 구조 (단일 파일 앱)
-- `index.html` — 앱 전체(인라인 CSS + JS). 탭: 홈/운동/식단/습관/신체 + 휴식 타이머 오버레이.
-- `manifest.json`, `sw.js`(오프라인 캐시 `momzzang-v1`), `icon.svg` + `icon-192/512/180.png`.
-- `make_icons.py` — Pillow로 PNG 아이콘 생성. `serve.py` — 로컬 멀티스레드 서버.
+- 앱 코드는 모두 `app/` 폴더 안에 있다. GitHub Pages는 이 `app/` 폴더를 GitHub Actions 워크플로(`.github/workflows/pages.yml`)로 배포한다.
+- `app/index.html` — 앱 전체(인라인 CSS + JS). 탭: 홈/운동/식단/습관/신체 + 휴식 타이머 오버레이.
+- `app/manifest.json`, `app/sw.js`(오프라인 캐시 `momzzang-v1`), `app/icon.svg` + `app/icon-192/512/180.png`.
+- `app/make_icons.py` — Pillow로 PNG 아이콘 생성. `app/serve.py` — 로컬 멀티스레드 서버.
 - 코드가 ~1500줄 넘어 불편해지면 그때 모듈 분리 검토(지금은 단일 파일 유지).
 
 ## 데이터 모델 (`DB`)
