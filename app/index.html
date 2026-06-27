@@ -744,8 +744,10 @@ function restDefault(){return DB.settings.restDefault||90;}
 function fmtClock(s){const m=Math.floor(s/60);return m+':'+String(s%60).padStart(2,'0');}
 function showRestBar(){
   const bar=document.getElementById('restBar'),fab=document.getElementById('restFab');
+  const sheetTime=document.getElementById('restSheetTime');
   if(restRemain>0){bar.classList.add('show');fab.classList.remove('show');
     document.getElementById('restTime').textContent=fmtClock(restRemain);
+    if(sheetTime)sheetTime.textContent=fmtClock(restRemain);
     bar.classList.toggle('warn',restRunning&&restRemain<=10);}
   else{bar.classList.remove('show','warn');fab.classList.toggle('show',tab==='workout');}
 }
@@ -757,6 +759,7 @@ function tickRest(){if(!restRunning)return;restRemain--;
 function finishRest(){beep();if(navigator.vibrate)navigator.vibrate([200,100,200]);
   const bar=document.getElementById('restBar');bar.classList.add('show','done');
   document.getElementById('restTime').textContent='완료!';
+  const sheetTime=document.getElementById('restSheetTime');if(sheetTime)sheetTime.textContent='완료!';
   setTimeout(()=>{bar.classList.remove('done');restRemain=0;showRestBar();},2500);}
 function stopRest(){clearInterval(restTimer);restRunning=false;restRemain=0;showRestBar();closeSheet();}
 function addRestTime(n){if(restRemain<=0)return;restRemain=Math.max(1,restRemain+n);showRestBar();}
@@ -770,7 +773,7 @@ function beep(){try{const a=new (window.AudioContext||window.webkitAudioContext)
 function openRestPicker(){
   let html=`<h3>⏱ 휴식 타이머</h3>`;
   if(restRemain>0){
-    html+=`<div style="text-align:center;font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;margin:4px 0">${fmtClock(restRemain)}</div>
+    html+=`<div id="restSheetTime" style="text-align:center;font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;margin:4px 0">${fmtClock(restRemain)}</div>
       <div class="grid3 mt8">
         <button class="btn sec" onclick="addRestTime(-15);openRestPicker()">−15초</button>
         <button class="btn sec" onclick="toggleRest()">${restRunning?'⏸ 일시정지':'▶ 계속'}</button>
