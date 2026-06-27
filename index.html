@@ -134,6 +134,23 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 .fade{animation:fade .2s ease}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .mt8{margin-top:8px}.mt12{margin-top:12px}.mb8{margin-bottom:8px}
+
+/* 휴식 타이머 */
+.rest-fab{position:fixed;right:16px;bottom:calc(86px + var(--safe-bot));z-index:30;
+  width:54px;height:54px;border-radius:50%;background:var(--surface2);border:1px solid var(--line);
+  color:var(--text);font-size:24px;box-shadow:0 6px 20px rgba(0,0,0,.45);display:none;place-items:center}
+.rest-fab.show{display:grid}
+.rest-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + var(--safe-bot));
+  z-index:31;max-width:300px;width:calc(100% - 32px);background:var(--accent);color:#06250f;
+  border-radius:14px;padding:11px 16px;display:none;align-items:center;gap:10px;font-weight:800;
+  box-shadow:0 8px 26px rgba(0,0,0,.45)}
+.rest-bar.show{display:flex}
+.rest-bar.warn{background:var(--warn)}
+.rest-time{font-size:22px;font-variant-numeric:tabular-nums;min-width:62px}
+.rest-label{flex:1;font-size:14px;opacity:.8}
+.rest-x{background:rgba(0,0,0,.18);border:none;color:#06250f;width:30px;height:30px;border-radius:8px;font-size:15px;font-weight:800}
+.rest-bar.done{animation:restflash .5s ease 3}
+@keyframes restflash{0%,100%{background:var(--accent)}50%{background:#fff}}
 </style>
 </head>
 <body>
@@ -162,6 +179,14 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
     <button data-tab="habit"><span class="ico">✅</span>습관</button>
     <button data-tab="body"><span class="ico">📈</span>신체</button>
   </nav>
+</div>
+
+<!-- 휴식 타이머 (재렌더링과 무관하게 유지되는 고정 오버레이) -->
+<button class="rest-fab" id="restFab" onclick="openRestPicker()" aria-label="휴식 타이머">⏱</button>
+<div class="rest-bar" id="restBar" onclick="openRestPicker()">
+  <span class="rest-time" id="restTime">0:00</span>
+  <span class="rest-label">휴식 중</span>
+  <button class="rest-x" onclick="event.stopPropagation();stopRest()" aria-label="정지">✕</button>
 </div>
 
 <div class="sheet-bg" id="sheetBg"></div>
@@ -204,7 +229,7 @@ let tab='home';
 const TITLES={home:'홈',workout:'운동일지',meal:'식단',habit:'생활습관',body:'신체변화'};
 function setTab(t){tab=t;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.getElementById('datebar').style.display = t==='body'?'none':'flex';
-  renderAll();}
+  renderAll();showRestBar();}
 
 function renderAll(){
   document.getElementById('dateText').innerHTML=fmtDate(cur);
@@ -317,7 +342,8 @@ function addEx(){const n=document.getElementById('exName').value.trim();if(!n)re
 function quickEx(name){if(!DB.workouts[cur])DB.workouts[cur]=[];
   DB.workouts[cur].push({name,sets:[{weight:'',reps:''}]});save();renderAll();}
 function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
-  sets.push({weight:last.weight||'',reps:last.reps||''});save();renderAll();}
+  sets.push({weight:last.weight||'',reps:last.reps||''});save();renderAll();
+  if(DB.settings.autoRest!==false)startRest(restDefault());}
 function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
   if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
 function delEx(i){DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
@@ -571,6 +597,70 @@ function openSheet(html){document.getElementById('sheet').innerHTML=html;
   requestAnimationFrame(()=>document.getElementById('sheet').classList.add('show'));}
 function closeSheet(){document.getElementById('sheet').classList.remove('show');
   document.getElementById('sheetBg').classList.remove('show');}
+
+/* ============ 휴식 타이머 ============ */
+let restRemain=0, restTimer=null, restRunning=false;
+function restPresets(){return DB.settings.restPresets||[60,90,120,180];}
+function restDefault(){return DB.settings.restDefault||90;}
+function fmtClock(s){const m=Math.floor(s/60);return m+':'+String(s%60).padStart(2,'0');}
+function showRestBar(){
+  const bar=document.getElementById('restBar'),fab=document.getElementById('restFab');
+  if(restRemain>0){bar.classList.add('show');fab.classList.remove('show');
+    document.getElementById('restTime').textContent=fmtClock(restRemain);
+    bar.classList.toggle('warn',restRunning&&restRemain<=10);}
+  else{bar.classList.remove('show','warn');fab.classList.toggle('show',tab==='workout');}
+}
+function startRest(sec){restRemain=sec;restRunning=true;clearInterval(restTimer);
+  restTimer=setInterval(tickRest,1000);showRestBar();}
+function tickRest(){if(!restRunning)return;restRemain--;
+  if(restRemain<=0){restRemain=0;clearInterval(restTimer);restRunning=false;finishRest();return;}
+  showRestBar();}
+function finishRest(){beep();if(navigator.vibrate)navigator.vibrate([200,100,200]);
+  const bar=document.getElementById('restBar');bar.classList.add('show','done');
+  document.getElementById('restTime').textContent='완료!';
+  setTimeout(()=>{bar.classList.remove('done');restRemain=0;showRestBar();},2500);}
+function stopRest(){clearInterval(restTimer);restRunning=false;restRemain=0;showRestBar();closeSheet();}
+function addRestTime(n){if(restRemain<=0)return;restRemain=Math.max(1,restRemain+n);showRestBar();}
+function toggleRest(){if(restRemain<=0)return;restRunning=!restRunning;
+  clearInterval(restTimer);if(restRunning)restTimer=setInterval(tickRest,1000);
+  showRestBar();openRestPicker();}
+function beep(){try{const a=new (window.AudioContext||window.webkitAudioContext)();
+  const o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);
+  o.type='sine';g.gain.value=.18;o.frequency.setValueAtTime(880,a.currentTime);
+  o.frequency.setValueAtTime(1320,a.currentTime+.15);o.start();o.stop(a.currentTime+.32);}catch(e){}}
+function openRestPicker(){
+  let html=`<h3>⏱ 휴식 타이머</h3>`;
+  if(restRemain>0){
+    html+=`<div style="text-align:center;font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;margin:4px 0">${fmtClock(restRemain)}</div>
+      <div class="grid3 mt8">
+        <button class="btn sec" onclick="addRestTime(-15);openRestPicker()">−15초</button>
+        <button class="btn sec" onclick="toggleRest()">${restRunning?'⏸ 일시정지':'▶ 계속'}</button>
+        <button class="btn sec" onclick="addRestTime(15);openRestPicker()">+15초</button>
+      </div>
+      <button class="btn danger mt8" onclick="stopRest()">■ 정지</button>`;
+  }else{
+    html+=`<div class="muted" style="font-size:13px;margin-bottom:10px">세트 사이 휴식 시간을 재요. 0이 되면 소리·진동으로 알려드려요.</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+      ${restPresets().map(s=>`<button class="chip" onclick="startRest(${s});closeSheet()">${fmtClock(s)}</button>`).join('')}
+      </div>
+      <div class="divider"></div>
+      <label class="fld">직접 입력 (초)</label>
+      <div class="row" style="gap:8px">
+        <input type="number" inputmode="numeric" id="restCustom" placeholder="예: 75" value="${restDefault()}">
+        <button class="btn sm" style="white-space:nowrap" onclick="startCustomRest()">시작</button>
+      </div>
+      <div class="row mt12" style="align-items:center;gap:9px">
+        <input type="checkbox" id="autoRest" ${DB.settings.autoRest!==false?'checked':''} onchange="setAutoRest(this.checked)" style="width:20px;height:20px;flex:none">
+        <label for="autoRest" style="font-size:14px">'+ 세트' 누르면 자동으로 휴식 시작</label>
+      </div>`;
+  }
+  html+=`<button class="btn sec mt12" onclick="closeSheet()">닫기</button>`;
+  openSheet(html);
+}
+function startCustomRest(){const v=parseInt(document.getElementById('restCustom').value)||0;
+  if(v<5){toast('5초 이상 입력해주세요');return;}
+  DB.settings.restDefault=v;save();startRest(v);closeSheet();}
+function setAutoRest(on){DB.settings.autoRest=on;save();}
 
 /* ============ 이벤트 바인딩 ============ */
 document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
