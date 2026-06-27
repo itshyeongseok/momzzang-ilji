@@ -306,7 +306,8 @@ function viewWorkout(){
   let html=`<div class="card"><div class="spread mb8"><h2 style="margin:0">🏋️ 운동 ${list.length?`<span class="tag">볼륨 ${workoutVolume(list).toLocaleString()}kg</span>`:''}</h2></div>`;
   if(!list.length)html+=`<div class="empty">아직 기록이 없어요.<br>아래에서 운동을 추가해보세요.</div>`;
   list.forEach((ex,i)=>{
-    html+=`<div class="ex"><div class="ex-head"><span class="name">${esc(ex.name)}</span>
+    const best=exerciseMaxWeight(ex.name);
+    html+=`<div class="ex"><div class="ex-head"><span class="name">${esc(ex.name)}${best>0?` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆${best}kg</span>`:''}</span>
       <button class="btn sm sec" onclick="addSet(${i})">+ 세트</button>
       <button class="x" onclick="delEx(${i})">✕</button></div>
       <div class="setline"><div class="n"></div><div class="set-unit">무게(kg)</div><div class="set-unit">횟수</div><div></div></div>`;
@@ -327,6 +328,14 @@ function viewWorkout(){
     ${prev?`<div class="divider"></div><div class="muted" style="font-size:12px;margin-bottom:7px">📋 최근 운동 (${prev.date}) 불러오기</div>
       <button class="btn sec sm" onclick="copyWorkout('${prev.date}')">그대로 가져오기</button>`:''}
   </div>`;
+  const prs=allPRs();
+  if(prs.length){
+    html+=`<div class="card"><h2>🏆 개인 최고기록 <span class="tag">${prs.length}종목</span></h2>`;
+    prs.forEach(p=>{html+=`<div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <span style="font-weight:600">${esc(p.name)}</span>
+      <span><b style="color:var(--warn)">${p.weight}kg</b> <span class="muted" style="font-size:12px">${p.reps?('× '+p.reps+'회 '):''}· ${p.date}</span></span></div>`;});
+    html+=`</div>`;
+  }
   return html;
 }
 function commonExChips(){
@@ -348,10 +357,30 @@ function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
   if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
 function delEx(i){DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
 function setVal(i,j,f,v){DB.workouts[cur][i].sets[j][f]=v;save();
+  if(f==='weight'){const name=DB.workouts[cur][i].name;const w=+v||0;
+    if(w>0 && w>exerciseMaxWeight(name,{date:cur,i,j})){
+      toast('🏆 '+name+' 신기록 '+w+'kg!');if(navigator.vibrate)navigator.vibrate(120);}}
   document.querySelector('#view .card .tag')&&renderAll();}
 function copyWorkout(date){
   DB.workouts[cur]=DB.workouts[date].map(e=>({name:e.name,sets:e.sets.map(s=>({weight:s.weight,reps:s.reps}))}));
   save();renderAll();toast('지난 운동을 불러왔어요');
+}
+/* 개인 최고기록: 저장된 운동 데이터에서 계산(별도 저장 없음) */
+function exerciseMaxWeight(name,skip){
+  let max=0;
+  for(const d in DB.workouts){DB.workouts[d].forEach((ex,i)=>{if(ex.name!==name)return;
+    ex.sets.forEach((s,j)=>{if(skip&&skip.date===d&&skip.i===i&&skip.j===j)return;
+      const w=+s.weight||0;if(w>max)max=w;});});}
+  return max;
+}
+function allPRs(){
+  const best={};
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{ex.sets.forEach(s=>{
+    const w=+s.weight||0;if(w<=0)return;
+    if(!best[ex.name]||w>best[ex.name].weight)best[ex.name]={weight:w,reps:+s.reps||0,date:d};
+  });});}
+  return Object.entries(best).map(([name,v])=>({name,weight:v.weight,reps:v.reps,date:v.date}))
+    .sort((a,b)=>b.weight-a.weight);
 }
 
 /* ============ 식단 ============ */
