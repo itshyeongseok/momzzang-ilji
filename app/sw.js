@@ -1,5 +1,5 @@
-/* 몸짱일지 서비스워커 - 오프라인 캐싱 */
-const CACHE = 'momzzang-v1';
+/* BULCUP 서비스워커 - 오프라인 캐싱 */
+const CACHE = 'bulcup-v2';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg',
   './icon-192.png', './icon-512.png', './icon-180.png'];
 
