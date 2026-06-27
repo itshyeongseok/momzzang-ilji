@@ -1,13 +1,13 @@
 {
-  "name": "몸짱일지 - 헬스 기록",
-  "short_name": "몸짱일지",
+  "name": "BULCUP",
+  "short_name": "BULCUP",
   "description": "운동·식단·생활습관·신체변화를 한곳에 기록하는 개인 헬스 일지",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0f1115",
-  "theme_color": "#0f1115",
+  "background_color": "#F2F4F7",
+  "theme_color": "#F2F4F7",
   "lang": "ko",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
