@@ -1,6 +1,7 @@
 /* 몸짱일지 서비스워커 - 오프라인 캐싱 */
 const CACHE = 'momzzang-v1';
-const ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
+const ASSETS = ['./', './index.html', './manifest.json', './icon.svg',
+  './icon-192.png', './icon-512.png', './icon-180.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
