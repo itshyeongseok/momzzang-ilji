@@ -161,6 +161,20 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .mt8{margin-top:8px}.mt12{margin-top:12px}.mb8{margin-bottom:8px}
 
+/* 운동 경과시간 바 (#view 밖 고정, 진행 중에만 표시) */
+.elapsed-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + var(--safe-bot));
+  z-index:32;max-width:520px;width:calc(100% - 32px);background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:9px 10px 9px 14px;display:none;align-items:center;gap:10px;
+  box-shadow:0 8px 24px -6px rgba(16,24,40,.18)}
+.elapsed-bar.show{display:flex}
+.elapsed-label{font-size:13px;color:var(--muted);font-weight:700;white-space:nowrap}
+.elapsed-time{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text-strong);
+  min-width:56px;flex:1}
+.elapsed-end{background:linear-gradient(135deg,#3B82F6 0%,#2563EB 100%);color:var(--on-accent);border:none;
+  border-radius:11px;padding:9px 14px;font-weight:800;font-size:14px;white-space:nowrap;
+  box-shadow:0 4px 14px -4px var(--accent-strong)}
+.elapsed-end:active{transform:translateY(1px);filter:brightness(.97)}
+
 /* 휴식 타이머 */
 .rest-fab{position:fixed;right:16px;bottom:calc(86px + var(--safe-bot));z-index:30;
   width:54px;height:54px;border-radius:50%;background:var(--surface);border:1px solid var(--line);
@@ -206,6 +220,13 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
   </nav>
 </div>
 
+<!-- 운동 경과시간 바 (재렌더링과 무관한 #view 밖 고정 오버레이) -->
+<div class="elapsed-bar" id="elapsedBar">
+  <span class="elapsed-label">⏱ 운동 시간</span>
+  <span class="elapsed-time" id="elapsedTime">0:00</span>
+  <button class="elapsed-end" onclick="endSession()">운동 종료</button>
+</div>
+
 <!-- 휴식 타이머 (재렌더링과 무관하게 유지되는 고정 오버레이) -->
 <button class="rest-fab" id="restFab" onclick="openRestPicker()" aria-label="휴식 타이머">⏱</button>
 <div class="rest-bar" id="restBar" onclick="openRestPicker()">
@@ -222,7 +243,7 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 /* ============ 저장소 ============ */
 const KEY='momzzang_v1';
 const DEFAULT={
-  workouts:{}, meals:{}, habits:{}, body:[],
+  workouts:{}, meals:{}, habits:{}, body:[], sessions:{},
   habitDefs:[
     {id:'sleep', name:'수면', type:'num', unit:'시간', step:0.5, icon:'😴'},
     {id:'water', name:'물', type:'num', unit:'컵', step:1, icon:'💧'},
@@ -267,6 +288,7 @@ function renderAll(){
   else if(tab==='stats')v.innerHTML=viewStats();
   else if(tab==='me')v.innerHTML=viewMe();
   if(tab==='home'||tab==='stats')drawChart();
+  showElapsed();
 }
 
 /* ============ 홈 ============ */
@@ -410,10 +432,53 @@ function viewMe(){
 
 /* ============ 운동일지 ============ */
 function workoutVolume(list){let v=0;(list||[]).forEach(e=>e.sets.forEach(s=>{v+=(+s.weight||0)*(+s.reps||0);}));return Math.round(v);}
+
+/* ----- 운동 세션 (시작/종료 + 경과시간) -----
+   설계: 운동/세트 데이터는 기존 DB.workouts[date] 그대로(백업 호환). 세션은 시간 메타만
+   DB.sessions[date]에 분리 저장하고, 세션 활성 중 만든 세트엔 sid를 찍어 PR 토스트를 게이팅. */
+function isSessionActive(){return !!DB.settings.activeSessionId;}
+function activeSession(){
+  if(!DB.settings.activeSessionId)return null;
+  const d=DB.settings.activeSessionDate;
+  return (DB.sessions[d]||[]).find(s=>s.id===DB.settings.activeSessionId)||null;
+}
+function startSession(){
+  if(isSessionActive())return;
+  const id='s'+Date.now();
+  if(!DB.sessions[cur])DB.sessions[cur]=[];
+  DB.sessions[cur].push({id,startedAt:Date.now(),endedAt:null,durationSec:0});
+  DB.settings.activeSessionId=id;DB.settings.activeSessionDate=cur;
+  save();startElapsed();renderAll();
+}
+function endSession(){
+  const s=activeSession();if(!s)return;
+  if(!confirm('운동을 종료할까요?'))return;
+  s.endedAt=Date.now();
+  s.durationSec=Math.max(0,Math.round((s.endedAt-s.startedAt)/1000));
+  DB.settings.activeSessionId=null;DB.settings.activeSessionDate=null;
+  save();stopElapsed();renderAll();
+  toast('운동 종료 · 소요시간 '+fmtDur(s.durationSec));
+}
+function elapsedSec(){const s=activeSession();return s?Math.max(0,Math.round((Date.now()-s.startedAt)/1000)):0;}
+function fmtDur(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60,z=n=>String(n).padStart(2,'0');
+  return h>0?h+':'+z(m)+':'+z(x):m+':'+z(x);}
+/* 활성 세션이 속한 활성 세트인지(PR 토스트 게이팅용) */
+function isActiveSet(i,j){
+  if(!isSessionActive()||DB.settings.activeSessionDate!==cur)return false;
+  const ex=(DB.workouts[cur]||[])[i];const st=ex&&ex.sets[j];
+  return !!(st&&st.sid===DB.settings.activeSessionId);
+}
 function viewWorkout(){
   const list=DB.workouts[cur]||[];
   const prev=lastWorkoutBefore(cur);
+  const active=isSessionActive()&&DB.settings.activeSessionDate===cur;
   let html=`<div class="card"><div class="spread mb8"><h2 style="margin:0">🏋️ 운동 ${list.length?`<span class="tag">볼륨 ${workoutVolume(list).toLocaleString()}kg</span>`:''}</h2></div>`;
+  if(active){
+    html+=`<div class="muted" style="font-size:13px;margin-bottom:10px">⏱ 운동 진행 중 · 아래 바의 <b style="color:var(--text)">운동 종료</b>로 마무리하세요. 신기록은 진행 중에만 알려드려요.</div>`;
+  }else{
+    html+=`<button class="btn mb8" onclick="startSession()">▶ 운동 시작</button>
+      <div class="muted" style="font-size:12px;margin-bottom:10px;text-align:center">운동 시작을 누르면 시간이 측정되고 신기록이 표시돼요.</div>`;
+  }
   if(!list.length)html+=`<div class="empty">아직 기록이 없어요.<br>아래에서 운동을 추가해보세요.</div>`;
   list.forEach((ex,i)=>{
     const best=exerciseMaxWeight(ex.name);
@@ -458,16 +523,18 @@ function lastWorkoutBefore(date){
   if(!ks.length)return null;const k=ks[ks.length-1];return {date:k,list:DB.workouts[k]};
 }
 function addEx(){const n=document.getElementById('exName').value.trim();if(!n)return;quickEx(n);}
+function curSid(){return (isSessionActive()&&DB.settings.activeSessionDate===cur)?DB.settings.activeSessionId:undefined;}
 function quickEx(name){if(!DB.workouts[cur])DB.workouts[cur]=[];
-  DB.workouts[cur].push({name,sets:[{weight:'',reps:''}]});save();renderAll();}
+  DB.workouts[cur].push({name,sets:[{weight:'',reps:'',sid:curSid()}]});save();renderAll();}
 function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
-  sets.push({weight:last.weight||'',reps:last.reps||''});save();renderAll();
+  sets.push({weight:last.weight||'',reps:last.reps||'',sid:curSid()});save();renderAll();
   if(DB.settings.autoRest!==false)startRest(restDefault());}
 function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
   if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
 function delEx(i){DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
 function setVal(i,j,f,v){DB.workouts[cur][i].sets[j][f]=v;save();
-  if(f==='weight'){const name=DB.workouts[cur][i].name;const w=+v||0;
+  // PR 토스트는 활성 세션의 세트일 때만(과거 기록 수정 시 오발화 방지)
+  if(f==='weight' && isActiveSet(i,j)){const name=DB.workouts[cur][i].name;const w=+v||0;
     if(w>0 && w>exerciseMaxWeight(name,{date:cur,i,j})){
       toast('🏆 '+name+' 신기록 '+w+'kg!');if(navigator.vibrate)navigator.vibrate(120);}}
   document.querySelector('#view .card .tag')&&renderAll();}
@@ -721,10 +788,11 @@ function exportData(){
 }
 function importData(input){const f=input.files[0];if(!f)return;
   const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);
-    if(!d.habitDefs)throw 0;DB=Object.assign(structuredClone(DEFAULT),d);save();closeSheet();renderAll();toast('백업을 불러왔어요');
+    if(!d.habitDefs)throw 0;DB=Object.assign(structuredClone(DEFAULT),d);save();closeSheet();
+    if(isSessionActive())startElapsed();else stopElapsed();renderAll();toast('백업을 불러왔어요');
   }catch(e){toast('올바른 백업 파일이 아니에요');}};r.readAsText(f);}
 function resetData(){if(!confirm('정말 모든 기록을 삭제할까요? 되돌릴 수 없어요.'))return;
-  DB=structuredClone(DEFAULT);save();closeSheet();renderAll();toast('초기화했어요');}
+  DB=structuredClone(DEFAULT);save();stopElapsed();closeSheet();renderAll();toast('초기화했어요');}
 
 /* ============ 공통 UI ============ */
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -736,6 +804,22 @@ function openSheet(html){document.getElementById('sheet').innerHTML=html;
   requestAnimationFrame(()=>document.getElementById('sheet').classList.add('show'));}
 function closeSheet(){document.getElementById('sheet').classList.remove('show');
   document.getElementById('sheetBg').classList.remove('show');}
+
+/* ============ 운동 경과시간 표시 ============ */
+let elapsedTimer=null;
+function updateElapsed(){const t=document.getElementById('elapsedTime');if(t)t.textContent=fmtDur(elapsedSec());}
+function showElapsed(){
+  const bar=document.getElementById('elapsedBar');if(!bar)return;
+  const on=isSessionActive();
+  bar.classList.toggle('show',on);
+  if(on)updateElapsed();
+  // 휴식 바와 겹치지 않게: 세션 진행 중엔 휴식 바를 한 칸 위로
+  const rb=document.getElementById('restBar');
+  if(rb)rb.style.bottom=on?'calc(150px + var(--safe-bot))':'';
+}
+function startElapsed(){clearInterval(elapsedTimer);updateElapsed();showElapsed();
+  elapsedTimer=setInterval(updateElapsed,1000);}
+function stopElapsed(){clearInterval(elapsedTimer);elapsedTimer=null;showElapsed();}
 
 /* ============ 휴식 타이머 ============ */
 let restRemain=0, restTimer=null, restRunning=false;
@@ -813,6 +897,7 @@ document.getElementById('menuBtn').addEventListener('click',openMenu);
 document.getElementById('sheetBg').addEventListener('click',closeSheet);
 
 renderAll();
+if(isSessionActive())startElapsed();  // 앱 재시작 시 활성 세션의 경과시간 이어서 표시
 
 /* ============ PWA 서비스워커 ============ */
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
