@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="몸짱일지">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>몸짱일지</title>
+<style>
+:root{
+  --bg:#0f1115; --surface:#171a21; --surface2:#1f2430; --line:#2a3140;
+  --text:#e7eaf0; --muted:#8b93a7; --accent:#4ade80; --accent2:#38bdf8;
+  --danger:#f87171; --warn:#fbbf24;
+  --safe-top:env(safe-area-inset-top); --safe-bot:env(safe-area-inset-bottom);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  font-size:16px;line-height:1.45;overscroll-behavior-y:none}
+button{font-family:inherit;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:16px}
+
+/* layout */
+#app{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+header{position:sticky;top:0;z-index:10;background:rgba(15,17,21,.85);backdrop-filter:blur(10px);
+  padding:calc(var(--safe-top) + 14px) 16px 12px;border-bottom:1px solid var(--line)}
+.head-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.title{font-size:20px;font-weight:800;letter-spacing:-.5px}
+.title small{color:var(--muted);font-weight:600;font-size:12px;margin-left:6px}
+.icon-btn{background:var(--surface2);border:1px solid var(--line);color:var(--text);
+  width:38px;height:38px;border-radius:10px;font-size:17px;display:grid;place-items:center}
+.datebar{display:flex;align-items:center;gap:8px;margin-top:12px}
+.datebar button{background:var(--surface2);border:1px solid var(--line);color:var(--text);
+  width:40px;height:40px;border-radius:10px;font-size:18px;font-weight:700}
+.datebar .date-disp{flex:1;text-align:center;background:var(--surface2);border:1px solid var(--line);
+  border-radius:10px;height:40px;display:flex;align-items:center;justify-content:center;
+  font-weight:700;position:relative}
+.date-disp input{position:absolute;inset:0;opacity:0;width:100%;height:100%}
+.date-disp .today-dot{color:var(--accent);font-size:11px;margin-left:6px;font-weight:700}
+
+main{flex:1;padding:16px 16px calc(90px + var(--safe-bot));}
+
+/* bottom nav */
+nav{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(23,26,33,.92);
+  backdrop-filter:blur(12px);border-top:1px solid var(--line);
+  display:flex;max-width:520px;margin:0 auto;padding-bottom:var(--safe-bot)}
+nav button{flex:1;background:none;border:none;color:var(--muted);padding:9px 0 10px;
+  display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600}
+nav button .ico{font-size:21px;line-height:1}
+nav button.active{color:var(--accent)}
+
+/* cards & generic */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+.card h2{margin:0 0 12px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
+.card h2 .tag{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
+.muted{color:var(--muted)}
+.empty{text-align:center;color:var(--muted);padding:26px 10px;font-size:14px}
+.row{display:flex;gap:8px;align-items:center}
+.spread{display:flex;justify-content:space-between;align-items:center}
+label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;font-weight:600}
+input[type=text],input[type=number],select,textarea{
+  width:100%;background:var(--surface2);border:1px solid var(--line);color:var(--text);
+  border-radius:10px;padding:11px 12px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent2)}
+textarea{resize:vertical;min-height:54px}
+.btn{background:var(--accent);color:#06250f;border:none;border-radius:11px;padding:12px 16px;
+  font-weight:800;font-size:15px;width:100%}
+.btn.sec{background:var(--surface2);color:var(--text);border:1px solid var(--line)}
+.btn.sm{padding:9px 12px;font-size:13px;width:auto;border-radius:9px}
+.btn.danger{background:transparent;color:var(--danger);border:1px solid var(--line)}
+.chip{background:var(--surface2);border:1px solid var(--line);border-radius:999px;
+  padding:7px 13px;font-size:13px;font-weight:600;color:var(--text)}
+.chip.on{background:var(--accent);color:#06250f;border-color:var(--accent)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.x{color:var(--muted);background:none;border:none;font-size:18px;padding:4px 6px}
+.divider{height:1px;background:var(--line);margin:12px 0}
+.pill{display:inline-block;background:var(--surface2);border:1px solid var(--line);border-radius:8px;
+  padding:3px 9px;font-size:12px;font-weight:600;margin:0 4px 4px 0}
+
+/* workout exercise */
+.ex{background:var(--surface2);border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:10px}
+.ex-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ex-head .name{font-weight:700;font-size:15px;flex:1}
+.setline{display:grid;grid-template-columns:26px 1fr 1fr auto;gap:7px;align-items:center;margin-bottom:6px}
+.setline .n{color:var(--muted);font-size:13px;font-weight:700;text-align:center}
+.setline input{padding:9px 10px;text-align:center}
+.set-unit{font-size:11px;color:var(--muted);text-align:center}
+
+/* habit */
+.habit{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
+.habit:last-child{border-bottom:none}
+.habit .hname{flex:1;font-weight:600}
+.check{width:30px;height:30px;border-radius:9px;border:2px solid var(--line);background:var(--surface2);
+  display:grid;place-items:center;font-size:16px;color:transparent}
+.check.on{background:var(--accent);border-color:var(--accent);color:#06250f}
+.stepper{display:flex;align-items:center;gap:0;background:var(--surface2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.stepper button{background:none;border:none;color:var(--text);width:34px;height:36px;font-size:18px;font-weight:700}
+.stepper .val{min-width:46px;text-align:center;font-weight:700;font-size:15px}
+
+/* body chart */
+.metric{text-align:center;padding:6px}
+.metric .v{font-size:22px;font-weight:800}
+.metric .v small{font-size:12px;color:var(--muted);font-weight:600}
+.metric .l{font-size:12px;color:var(--muted);margin-top:2px}
+.delta{font-size:12px;font-weight:700}
+.delta.up{color:var(--accent2)} .delta.down{color:var(--accent)} .delta.bad{color:var(--danger)}
+svg.chart{width:100%;height:140px;display:block;margin-top:6px}
+
+/* summary home */
+.sum-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sum{background:var(--surface2);border:1px solid var(--line);border-radius:13px;padding:13px}
+.sum .k{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px}
+.sum .v{font-size:20px;font-weight:800;margin-top:5px}
+.sum .v small{font-size:12px;color:var(--muted);font-weight:600}
+
+/* modal/toast */
+.toast{position:fixed;bottom:calc(96px + var(--safe-bot));left:50%;transform:translateX(-50%);
+  background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:11px 18px;
+  border-radius:999px;font-size:14px;font-weight:600;z-index:50;opacity:0;transition:opacity .25s;
+  pointer-events:none;max-width:90%;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.toast.show{opacity:1}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40;display:none}
+.sheet-bg.show{display:block}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;max-width:520px;margin:0 auto;
+  background:var(--surface);border-radius:20px 20px 0 0;border:1px solid var(--line);
+  padding:18px 16px calc(20px + var(--safe-bot));transform:translateY(100%);transition:transform .25s}
+.sheet.show{transform:translateY(0)}
+.sheet h3{margin:2px 0 14px;font-size:16px}
+.fade{animation:fade .2s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.mt8{margin-top:8px}.mt12{margin-top:12px}.mb8{margin-bottom:8px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="head-row">
+      <div class="title" id="tabTitle">홈 <small id="streakLbl"></small></div>
+      <button class="icon-btn" id="menuBtn" aria-label="메뉴">⚙</button>
+    </div>
+    <div class="datebar" id="datebar">
+      <button id="prevDay" aria-label="이전 날">‹</button>
+      <div class="date-disp" id="dateDisp">
+        <span id="dateText"></span>
+        <input type="date" id="datePicker">
+      </div>
+      <button id="nextDay" aria-label="다음 날">›</button>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <nav id="nav">
+    <button data-tab="home" class="active"><span class="ico">🏠</span>홈</button>
+    <button data-tab="workout"><span class="ico">🏋️</span>운동</button>
+    <button data-tab="meal"><span class="ico">🍱</span>식단</button>
+    <button data-tab="habit"><span class="ico">✅</span>습관</button>
+    <button data-tab="body"><span class="ico">📈</span>신체</button>
+  </nav>
+</div>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 저장소 ============ */
+const KEY='momzzang_v1';
+const DEFAULT={
+  workouts:{}, meals:{}, habits:{}, body:[],
+  habitDefs:[
+    {id:'sleep', name:'수면', type:'num', unit:'시간', step:0.5, icon:'😴'},
+    {id:'water', name:'물', type:'num', unit:'컵', step:1, icon:'💧'},
+    {id:'protein', name:'단백질 챙김', type:'check', icon:'🥩'},
+    {id:'stretch', name:'스트레칭', type:'check', icon:'🧘'},
+    {id:'nojunk', name:'야식·정크 안 먹기', type:'check', icon:'🚫'}
+  ],
+  settings:{}
+};
+let DB=load();
+function load(){
+  try{const r=JSON.parse(localStorage.getItem(KEY));if(r)return Object.assign(structuredClone(DEFAULT),r);}catch(e){}
+  return structuredClone(DEFAULT);
+}
+function save(){localStorage.setItem(KEY,JSON.stringify(DB));}
+
+/* ============ 날짜 ============ */
+function ymd(d){const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());}
+let cur=ymd(new Date());
+const DOW=['일','월','화','수','목','금','토'];
+function fmtDate(s){const d=new Date(s+'T00:00');const t=ymd(new Date());
+  const diff=Math.round((new Date(s+'T00:00')-new Date(t+'T00:00'))/86400000);
+  let rel='';if(diff===0)rel=' <span class="today-dot">오늘</span>';else if(diff===-1)rel=' <span class="muted" style="font-size:11px">어제</span>';
+  return `${d.getMonth()+1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`+rel;}
+function shiftDay(n){const d=new Date(cur+'T00:00');d.setDate(d.getDate()+n);cur=ymd(d);renderAll();}
+
+/* ============ 탭 ============ */
+let tab='home';
+const TITLES={home:'홈',workout:'운동일지',meal:'식단',habit:'생활습관',body:'신체변화'};
+function setTab(t){tab=t;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
+  document.getElementById('datebar').style.display = t==='body'?'none':'flex';
+  renderAll();}
+
+function renderAll(){
+  document.getElementById('dateText').innerHTML=fmtDate(cur);
+  document.getElementById('datePicker').value=cur;
+  document.getElementById('tabTitle').firstChild.textContent=TITLES[tab]+' ';
+  document.getElementById('streakLbl').textContent = tab==='home'? streakLabel() : '';
+  const v=document.getElementById('view');v.className='fade';
+  if(tab==='home')v.innerHTML=viewHome();
+  else if(tab==='workout')v.innerHTML=viewWorkout();
+  else if(tab==='meal')v.innerHTML=viewMeal();
+  else if(tab==='habit')v.innerHTML=viewHabit();
+  else if(tab==='body')v.innerHTML=viewBody();
+  if(tab==='body')drawChart();
+}
+
+/* ============ 홈 ============ */
+function streakLabel(){
+  let n=0;const d=new Date();
+  while(true){const k=ymd(d);if(dayLogged(k)){n++;d.setDate(d.getDate()-1);}else break;if(n>999)break;}
+  return n>0?`🔥 ${n}일 연속`:'';
+}
+function dayLogged(k){
+  return (DB.workouts[k]&&DB.workouts[k].length)|| (DB.meals[k]&&DB.meals[k].length)||
+    (DB.habits[k]&&Object.keys(DB.habits[k]).length);
+}
+function viewHome(){
+  const w=DB.workouts[cur]||[];const m=DB.meals[cur]||[];const h=DB.habits[cur]||{};
+  const vol=workoutVolume(w);
+  const kcal=m.reduce((s,x)=>s+(+x.kcal||0),0);
+  const prot=m.reduce((s,x)=>s+(+x.protein||0),0);
+  const hDone=DB.habitDefs.filter(d=>d.type==='check'&&h[d.id]).length;
+  const hTotal=DB.habitDefs.filter(d=>d.type==='check').length;
+  const last=DB.body[DB.body.length-1];
+  return `
+  <div class="card">
+    <h2>📅 ${fmtDate(cur).replace(/<[^>]+>/g,'')} 요약</h2>
+    <div class="sum-grid">
+      <div class="sum" onclick="setTab('workout')"><div class="k">🏋️ 운동</div>
+        <div class="v">${w.length}<small> 종목</small></div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${vol?('볼륨 '+vol.toLocaleString()+'kg'):'기록 없음'}</div></div>
+      <div class="sum" onclick="setTab('meal')"><div class="k">🍱 식단</div>
+        <div class="v">${m.length}<small> 끼</small></div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${kcal?(kcal+'kcal · 단백 '+prot+'g'):'기록 없음'}</div></div>
+      <div class="sum" onclick="setTab('habit')"><div class="k">✅ 습관</div>
+        <div class="v">${hDone}<small>/${hTotal} 완료</small></div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${h.sleep?('수면 '+h.sleep+'h · 물 '+(h.water||0)+'컵'):'체크 안 함'}</div></div>
+      <div class="sum" onclick="setTab('body')"><div class="k">📈 체중</div>
+        <div class="v">${last?last.weight:'—'}<small>${last?'kg':''}</small></div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${last?('측정 '+last.date):'기록 없음'}</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>⚡ 빠른 시작</h2>
+    <div class="grid2">
+      <button class="btn sec" onclick="setTab('workout')">+ 운동 추가</button>
+      <button class="btn sec" onclick="setTab('meal')">+ 식단 추가</button>
+    </div>
+    <div class="grid2 mt8">
+      <button class="btn sec" onclick="setTab('habit')">오늘 습관 체크</button>
+      <button class="btn sec" onclick="setTab('body')">몸무게 기록</button>
+    </div>
+  </div>
+  ${w.length?`<div class="card"><h2>오늘 한 운동</h2>${w.map(e=>`<div class="pill">${esc(e.name)} ${e.sets.length}세트</div>`).join('')}</div>`:''}
+  <div class="card" style="text-align:center;background:none;border-style:dashed">
+    <div class="muted" style="font-size:13px">"고형석은 몸짱이 될 테야" 💪<br>꾸준함이 근육보다 먼저 자란다.</div>
+  </div>`;
+}
+
+/* ============ 운동일지 ============ */
+function workoutVolume(list){let v=0;(list||[]).forEach(e=>e.sets.forEach(s=>{v+=(+s.weight||0)*(+s.reps||0);}));return Math.round(v);}
+function viewWorkout(){
+  const list=DB.workouts[cur]||[];
+  const prev=lastWorkoutBefore(cur);
+  let html=`<div class="card"><div class="spread mb8"><h2 style="margin:0">🏋️ 운동 ${list.length?`<span class="tag">볼륨 ${workoutVolume(list).toLocaleString()}kg</span>`:''}</h2></div>`;
+  if(!list.length)html+=`<div class="empty">아직 기록이 없어요.<br>아래에서 운동을 추가해보세요.</div>`;
+  list.forEach((ex,i)=>{
+    html+=`<div class="ex"><div class="ex-head"><span class="name">${esc(ex.name)}</span>
+      <button class="btn sm sec" onclick="addSet(${i})">+ 세트</button>
+      <button class="x" onclick="delEx(${i})">✕</button></div>
+      <div class="setline"><div class="n"></div><div class="set-unit">무게(kg)</div><div class="set-unit">횟수</div><div></div></div>`;
+    ex.sets.forEach((s,j)=>{
+      html+=`<div class="setline"><div class="n">${j+1}</div>
+        <input type="number" inputmode="decimal" value="${s.weight??''}" placeholder="0" onchange="setVal(${i},${j},'weight',this.value)">
+        <input type="number" inputmode="numeric" value="${s.reps??''}" placeholder="0" onchange="setVal(${i},${j},'reps',this.value)">
+        <button class="x" onclick="delSet(${i},${j})">✕</button></div>`;
+    });
+    html+=`</div>`;
+  });
+  html+=`</div>`;
+  // add bar
+  html+=`<div class="card"><h2>운동 추가</h2>
+    <input type="text" id="exName" placeholder="예: 벤치프레스, 스쿼트, 데드리프트">
+    <button class="btn mt8" onclick="addEx()">+ 추가</button>
+    ${commonExChips()}
+    ${prev?`<div class="divider"></div><div class="muted" style="font-size:12px;margin-bottom:7px">📋 최근 운동 (${prev.date}) 불러오기</div>
+      <button class="btn sec sm" onclick="copyWorkout('${prev.date}')">그대로 가져오기</button>`:''}
+  </div>`;
+  return html;
+}
+function commonExChips(){
+  const common=['벤치프레스','인클라인벤치','스쿼트','데드리프트','랫풀다운','바벨로우','오버헤드프레스','덤벨컬','레그프레스','케이블푸시다운'];
+  return `<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">`+
+    common.map(c=>`<button class="chip" onclick="quickEx('${c}')">${c}</button>`).join('')+`</div>`;
+}
+function lastWorkoutBefore(date){
+  const ks=Object.keys(DB.workouts).filter(k=>k<date&&DB.workouts[k].length).sort();
+  if(!ks.length)return null;const k=ks[ks.length-1];return {date:k,list:DB.workouts[k]};
+}
+function addEx(){const n=document.getElementById('exName').value.trim();if(!n)return;quickEx(n);}
+function quickEx(name){if(!DB.workouts[cur])DB.workouts[cur]=[];
+  DB.workouts[cur].push({name,sets:[{weight:'',reps:''}]});save();renderAll();}
+function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
+  sets.push({weight:last.weight||'',reps:last.reps||''});save();renderAll();}
+function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
+  if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
+function delEx(i){DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
+function setVal(i,j,f,v){DB.workouts[cur][i].sets[j][f]=v;save();
+  document.querySelector('#view .card .tag')&&renderAll();}
+function copyWorkout(date){
+  DB.workouts[cur]=DB.workouts[date].map(e=>({name:e.name,sets:e.sets.map(s=>({weight:s.weight,reps:s.reps}))}));
+  save();renderAll();toast('지난 운동을 불러왔어요');
+}
+
+/* ============ 식단 ============ */
+const MEALTYPES=['아침','점심','저녁','간식'];
+function viewMeal(){
+  const list=DB.meals[cur]||[];
+  const kcal=list.reduce((s,x)=>s+(+x.kcal||0),0);
+  const prot=list.reduce((s,x)=>s+(+x.protein||0),0);
+  let html=`<div class="card"><h2>🍱 식단 ${list.length?`<span class="tag">${kcal}kcal · 단백 ${prot}g</span>`:''}</h2>`;
+  if(!list.length)html+=`<div class="empty">먹은 걸 기록해보세요.<br>칼로리는 몰라도 메모만 남겨도 충분해요.</div>`;
+  MEALTYPES.forEach(t=>{
+    const items=list.map((x,idx)=>({x,idx})).filter(o=>o.x.type===t);
+    if(!items.length)return;
+    html+=`<div style="margin-bottom:10px"><div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">${mealIcon(t)} ${t}</div>`;
+    items.forEach(({x,idx})=>{
+      html+=`<div class="ex" style="margin-bottom:7px"><div class="spread"><div style="flex:1">
+        <div style="font-weight:600">${esc(x.memo||'(메모 없음)')}</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${x.kcal?x.kcal+'kcal':''}${x.protein?' · 단백 '+x.protein+'g':''}</div>
+        </div><button class="x" onclick="delMeal(${idx})">✕</button></div></div>`;
+    });
+    html+=`</div>`;
+  });
+  html+=`</div>`;
+  html+=`<div class="card"><h2>식단 추가</h2>
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      ${MEALTYPES.map((t,i)=>`<button class="chip ${i===0?'on':''}" data-mt="${t}" onclick="pickMT(this)">${mealIcon(t)} ${t}</button>`).join('')}
+    </div>
+    <textarea id="mealMemo" placeholder="예: 닭가슴살 200g + 고구마, 현미밥 한 공기"></textarea>
+    <div class="grid2 mt8">
+      <div><label class="fld">칼로리 (선택)</label><input type="number" inputmode="numeric" id="mealKcal" placeholder="kcal"></div>
+      <div><label class="fld">단백질 (선택)</label><input type="number" inputmode="numeric" id="mealProt" placeholder="g"></div>
+    </div>
+    <button class="btn mt8" onclick="addMeal()">+ 추가</button>
+  </div>`;
+  return html;
+}
+function mealIcon(t){return {아침:'🌅',점심:'☀️',저녁:'🌙',간식:'🍪'}[t]||'🍽';}
+let curMT='아침';
+function pickMT(el){curMT=el.dataset.mt;document.querySelectorAll('[data-mt]').forEach(c=>c.classList.toggle('on',c===el));}
+function addMeal(){const memo=document.getElementById('mealMemo').value.trim();
+  const kcal=document.getElementById('mealKcal').value;const protein=document.getElementById('mealProt').value;
+  if(!memo&&!kcal){toast('메모나 칼로리를 입력해주세요');return;}
+  if(!DB.meals[cur])DB.meals[cur]=[];
+  DB.meals[cur].push({type:curMT,memo,kcal,protein});save();renderAll();toast('기록했어요');
+}
+function delMeal(i){DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
+
+/* ============ 생활습관 ============ */
+function viewHabit(){
+  const h=DB.habits[cur]||{};
+  let html=`<div class="card"><h2>✅ 오늘의 습관</h2>`;
+  DB.habitDefs.forEach(d=>{
+    if(d.type==='check'){
+      const on=!!h[d.id];
+      html+=`<div class="habit"><span style="font-size:19px">${d.icon||'•'}</span>
+        <span class="hname">${esc(d.name)}</span>
+        <div class="check ${on?'on':''}" onclick="toggleHabit('${d.id}')">✓</div></div>`;
+    }else{
+      const val=+h[d.id]||0;
+      html+=`<div class="habit"><span style="font-size:19px">${d.icon||'•'}</span>
+        <span class="hname">${esc(d.name)} <span class="muted" style="font-size:12px">${val} ${d.unit||''}</span></span>
+        <div class="stepper"><button onclick="stepHabit('${d.id}',-${d.step||1})">−</button>
+          <span class="val">${val}</span>
+          <button onclick="stepHabit('${d.id}',${d.step||1})">+</button></div></div>`;
+    }
+  });
+  html+=`<div class="divider"></div>
+    <button class="btn sec sm" onclick="openHabitEditor()">⚙ 습관 항목 편집</button></div>`;
+  // weekly mini view
+  html+=`<div class="card"><h2>최근 7일</h2>${weekHabitGrid()}</div>`;
+  return html;
+}
+function toggleHabit(id){if(!DB.habits[cur])DB.habits[cur]={};DB.habits[cur][id]=!DB.habits[cur][id];
+  if(!DB.habits[cur][id])delete DB.habits[cur][id];cleanHabit();save();renderAll();}
+function stepHabit(id,step){if(!DB.habits[cur])DB.habits[cur]={};
+  let v=Math.round(((+DB.habits[cur][id]||0)+step)*10)/10;if(v<0)v=0;
+  DB.habits[cur][id]=v;if(!v)delete DB.habits[cur][id];cleanHabit();save();renderAll();}
+function cleanHabit(){if(DB.habits[cur]&&!Object.keys(DB.habits[cur]).length)delete DB.habits[cur];}
+function weekHabitGrid(){
+  const days=[];for(let i=6;i>=0;i--){const d=new Date(cur+'T00:00');d.setDate(d.getDate()-i);days.push(ymd(d));}
+  const checks=DB.habitDefs.filter(d=>d.type==='check');
+  if(!checks.length)return '<div class="muted" style="font-size:13px">체크형 습관이 없어요.</div>';
+  let html=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr><td></td>${days.map(d=>{const dd=new Date(d+'T00:00');return `<td style="text-align:center;color:var(--muted);padding:3px">${dd.getDate()}<br><span style="font-size:10px">${DOW[dd.getDay()]}</span></td>`;}).join('')}</tr>`;
+  checks.forEach(def=>{
+    html+=`<tr><td style="padding:5px 6px 5px 0;white-space:nowrap">${def.icon||''} ${esc(def.name)}</td>`;
+    days.forEach(d=>{const on=DB.habits[d]&&DB.habits[d][def.id];
+      html+=`<td style="text-align:center;padding:4px"><span style="display:inline-block;width:18px;height:18px;border-radius:6px;background:${on?'var(--accent)':'var(--surface2)'};border:1px solid var(--line)"></span></td>`;});
+    html+=`</tr>`;
+  });
+  html+=`</table></div>`;return html;
+}
+
+/* ============ 신체변화 ============ */
+function viewBody(){
+  const arr=[...DB.body].sort((a,b)=>a.date<b.date?-1:1);
+  const last=arr[arr.length-1],prev=arr[arr.length-2];
+  let html=`<div class="card"><h2>📈 현재 상태 ${last?`<span class="tag">${last.date}</span>`:''}</h2>`;
+  if(!last)html+=`<div class="empty">측정값을 기록하면<br>변화 그래프가 나타나요.</div>`;
+  else{
+    html+=`<div class="grid3">
+      ${metricBox('체중',last.weight,prev&&prev.weight,'kg',true)}
+      ${metricBox('골격근량',last.muscle,prev&&prev.muscle,'kg',false)}
+      ${metricBox('체지방률',last.fat,prev&&prev.fat,'%',true)}
+    </div>`;
+    html+=`<svg class="chart" id="chart" viewBox="0 0 320 140" preserveAspectRatio="none"></svg>
+      <div class="row" style="justify-content:center;gap:14px;font-size:11px;margin-top:4px">
+        <span class="muted">⬤ <span style="color:var(--accent)">체중</span></span>
+        <span class="muted">⬤ <span style="color:var(--accent2)">체지방률</span></span></div>`;
+  }
+  html+=`</div>`;
+  // input
+  html+=`<div class="card"><h2>측정 기록</h2>
+    <label class="fld">날짜</label><input type="date" id="bDate" value="${cur}">
+    <div class="grid3 mt8">
+      <div><label class="fld">체중(kg)</label><input type="number" inputmode="decimal" id="bWeight" placeholder="0"></div>
+      <div><label class="fld">골격근(kg)</label><input type="number" inputmode="decimal" id="bMuscle" placeholder="0"></div>
+      <div><label class="fld">체지방(%)</label><input type="number" inputmode="decimal" id="bFat" placeholder="0"></div>
+    </div>
+    <button class="btn mt8" onclick="addBody()">+ 저장</button>
+  </div>`;
+  if(arr.length){
+    html+=`<div class="card"><h2>기록 목록</h2>`;
+    [...arr].reverse().forEach((r,ri)=>{
+      const realIdx=DB.body.indexOf(r);
+      html+=`<div class="spread" style="padding:9px 0;border-bottom:1px solid var(--line)">
+        <div><b>${r.date}</b> <span class="muted" style="font-size:13px">
+        ${r.weight?r.weight+'kg':''}${r.muscle?' · 근'+r.muscle:''}${r.fat?' · 지'+r.fat+'%':''}</span></div>
+        <button class="x" onclick="delBody(${realIdx})">✕</button></div>`;
+    });
+    html+=`</div>`;
+  }
+  return html;
+}
+function metricBox(label,v,pv,unit,lowerBetter){
+  let d='';
+  if(v!=null&&pv!=null){const diff=Math.round((v-pv)*10)/10;
+    if(diff!==0){const good=lowerBetter?diff<0:diff>0;
+      d=`<div class="delta ${good?'down':'bad'}">${diff>0?'▲':'▼'} ${Math.abs(diff)}</div>`;}}
+  return `<div class="metric"><div class="v">${v??'—'}<small>${v!=null?unit:''}</small></div>
+    <div class="l">${label}</div>${d}</div>`;
+}
+function addBody(){
+  const date=document.getElementById('bDate').value;
+  const weight=parseFloat(document.getElementById('bWeight').value)||null;
+  const muscle=parseFloat(document.getElementById('bMuscle').value)||null;
+  const fat=parseFloat(document.getElementById('bFat').value)||null;
+  if(!date||(!weight&&!muscle&&!fat)){toast('값을 하나 이상 입력해주세요');return;}
+  const ex=DB.body.find(b=>b.date===date);
+  if(ex){if(weight)ex.weight=weight;if(muscle)ex.muscle=muscle;if(fat)ex.fat=fat;}
+  else DB.body.push({date,weight,muscle,fat});
+  save();renderAll();toast('저장했어요 💪');
+}
+function delBody(i){DB.body.splice(i,1);save();renderAll();}
+function drawChart(){
+  const svg=document.getElementById('chart');if(!svg)return;
+  const arr=[...DB.body].filter(b=>b.weight!=null).sort((a,b)=>a.date<b.date?-1:1);
+  if(arr.length<1)return;
+  const W=320,H=140,pad=8;
+  function line(vals,color){
+    const v=vals.filter(x=>x!=null);if(v.length<1)return '';
+    const min=Math.min(...v),max=Math.max(...v),rng=(max-min)||1;
+    const pts=vals.map((val,i)=>{if(val==null)return null;
+      const x=pad+(vals.length===1?W/2-pad:i*(W-2*pad)/(vals.length-1));
+      const y=H-pad-((val-min)/rng)*(H-2*pad);return [x,y];}).filter(Boolean);
+    let p=`<polyline fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(p=>p.join(',')).join(' ')}"/>`;
+    p+=pts.map(pt=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="3" fill="${color}"/>`).join('');
+    return p;
+  }
+  const weights=arr.map(b=>b.weight);
+  const fats=arr.map(b=>b.fat!=null?b.fat:null);
+  svg.innerHTML=line(weights,'#4ade80')+(fats.some(f=>f!=null)?line(fats,'#38bdf8'):'');
+}
+
+/* ============ 습관 편집 시트 ============ */
+function openHabitEditor(){
+  let html=`<h3>습관 항목 편집</h3>`;
+  DB.habitDefs.forEach((d,i)=>{
+    html+=`<div class="spread" style="padding:9px 0;border-bottom:1px solid var(--line)">
+      <span>${d.icon||'•'} ${esc(d.name)} <span class="muted" style="font-size:12px">(${d.type==='check'?'체크':'숫자'})</span></span>
+      <button class="x" onclick="delHabitDef(${i})">✕</button></div>`;
+  });
+  html+=`<div class="divider"></div>
+    <label class="fld">새 습관 이름</label><input type="text" id="newHabitName" placeholder="예: 유산소 30분">
+    <div class="row mt8" style="gap:8px">
+      <button class="chip on" id="htCheck" onclick="this.classList.add('on');document.getElementById('htNum').classList.remove('on')">✓ 체크형</button>
+      <button class="chip" id="htNum" onclick="this.classList.add('on');document.getElementById('htCheck').classList.remove('on')"># 숫자형</button>
+    </div>
+    <input type="text" id="newHabitUnit" class="mt8" placeholder="단위 (숫자형만, 예: 분/컵/시간)" style="display:none">
+    <button class="btn mt12" onclick="addHabitDef()">+ 추가</button>
+    <button class="btn sec mt8" onclick="closeSheet()">닫기</button>`;
+  openSheet(html);
+  document.getElementById('htNum').addEventListener('click',()=>document.getElementById('newHabitUnit').style.display='block');
+  document.getElementById('htCheck').addEventListener('click',()=>document.getElementById('newHabitUnit').style.display='none');
+}
+function addHabitDef(){
+  const name=document.getElementById('newHabitName').value.trim();if(!name)return;
+  const isNum=document.getElementById('htNum').classList.contains('on');
+  const unit=document.getElementById('newHabitUnit').value.trim();
+  const id='h'+Date.now();
+  DB.habitDefs.push(isNum?{id,name,type:'num',unit:unit||'',step:1,icon:'⭐'}:{id,name,type:'check',icon:'⭐'});
+  save();openHabitEditor();renderAll();
+}
+function delHabitDef(i){if(!confirm('이 습관 항목을 삭제할까요? (기존 기록도 사라집니다)'))return;
+  DB.habitDefs.splice(i,1);save();openHabitEditor();renderAll();}
+
+/* ============ 설정/백업 시트 ============ */
+function openMenu(){
+  const days=new Set([...Object.keys(DB.workouts),...Object.keys(DB.meals),...Object.keys(DB.habits)]).size;
+  const html=`<h3>⚙ 설정 · 백업</h3>
+    <div class="card" style="margin:0 0 12px"><div class="muted" style="font-size:13px">
+      기록한 날: <b style="color:var(--text)">${days}일</b> · 신체 측정: <b style="color:var(--text)">${DB.body.length}건</b><br>
+      <span style="font-size:12px">모든 데이터는 이 폰에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 백업하세요.</span>
+    </div></div>
+    <button class="btn" onclick="exportData()">⬇ 백업 파일 내보내기</button>
+    <label class="btn sec mt8" style="display:block;text-align:center">⬆ 백업 파일 불러오기
+      <input type="file" accept="application/json" style="display:none" onchange="importData(this)"></label>
+    <div class="divider"></div>
+    <button class="btn danger" onclick="resetData()">전체 기록 삭제</button>
+    <button class="btn sec mt8" onclick="closeSheet()">닫기</button>
+    <div class="muted" style="text-align:center;font-size:11px;margin-top:12px">몸짱일지 v1 · 만든 사람: 고형석 💪</div>`;
+  openSheet(html);
+}
+function exportData(){
+  const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='몸짱일지_백업_'+cur+'.json';a.click();toast('백업 파일을 저장했어요');
+}
+function importData(input){const f=input.files[0];if(!f)return;
+  const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);
+    if(!d.habitDefs)throw 0;DB=Object.assign(structuredClone(DEFAULT),d);save();closeSheet();renderAll();toast('백업을 불러왔어요');
+  }catch(e){toast('올바른 백업 파일이 아니에요');}};r.readAsText(f);}
+function resetData(){if(!confirm('정말 모든 기록을 삭제할까요? 되돌릴 수 없어요.'))return;
+  DB=structuredClone(DEFAULT);save();closeSheet();renderAll();toast('초기화했어요');}
+
+/* ============ 공통 UI ============ */
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+let toastT;
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1800);}
+function openSheet(html){document.getElementById('sheet').innerHTML=html;
+  document.getElementById('sheetBg').classList.add('show');
+  requestAnimationFrame(()=>document.getElementById('sheet').classList.add('show'));}
+function closeSheet(){document.getElementById('sheet').classList.remove('show');
+  document.getElementById('sheetBg').classList.remove('show');}
+
+/* ============ 이벤트 바인딩 ============ */
+document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
+document.getElementById('prevDay').addEventListener('click',()=>shiftDay(-1));
+document.getElementById('nextDay').addEventListener('click',()=>shiftDay(1));
+document.getElementById('datePicker').addEventListener('change',e=>{cur=e.target.value;renderAll();});
+document.getElementById('menuBtn').addEventListener('click',openMenu);
+document.getElementById('sheetBg').addEventListener('click',closeSheet);
+
+renderAll();
+
+/* ============ PWA 서비스워커 ============ */
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+</script>
+</body>
+</html>

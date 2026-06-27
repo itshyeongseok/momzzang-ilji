@@ -1,0 +1,15 @@
+{
+  "name": "몸짱일지 - 헬스 기록",
+  "short_name": "몸짱일지",
+  "description": "운동·식단·생활습관·신체변화를 한곳에 기록하는 개인 헬스 일지",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1115",
+  "theme_color": "#0f1115",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
