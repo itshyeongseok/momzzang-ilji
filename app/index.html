@@ -408,11 +408,22 @@ function viewMe(){
     <div class="metric"><div class="v">${last.muscle??'—'}<small>${last.muscle!=null?'kg':''}</small></div><div class="l">골격근량</div></div>
     <div class="metric"><div class="v">${last.fat??'—'}<small>${last.fat!=null?'%':''}</small></div><div class="l">체지방률</div></div></div>`;
   html+=`</div>`;
+  // 3대 중량 (추정 1RM)
+  const big=bigThree();const total=Math.round(big.reduce((s,b)=>s+b.oneRM,0)*10)/10;
+  if(total>0){
+    html+=`<div class="card"><h2>🏋️ 3대 중량 <span class="tag">추정 1RM</span></h2>
+      <div style="text-align:center;margin:2px 0 12px">
+        <div style="font-size:30px;font-weight:800;color:var(--text-strong)">TOTAL ${total.toLocaleString()}<small style="font-size:14px;color:var(--muted);font-weight:700"> kg</small></div></div>
+      <div class="grid3">${big.map(b=>`<div class="metric">
+        <div class="v">${b.oneRM>0?b.oneRM:'—'}<small>${b.oneRM>0?'kg':''}</small></div>
+        <div class="l">${b.label}</div></div>`).join('')}</div>
+      <div class="muted" style="font-size:11px;text-align:center;margin-top:10px">기록 기반 추정치 (Epley 공식: 무게 × (1 + 횟수/30))</div></div>`;
+  }
   // 개인 최고기록
   if(prs.length){
     html+=`<div class="card"><h2>🏆 개인 최고기록 <span class="tag">${prs.length}종목</span></h2>`;
-    prs.forEach(p=>{html+=`<div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
-      <span style="font-weight:600">${esc(p.name)}</span>
+    prs.forEach(p=>{const e=est1RM(p.name);html+=`<div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <span style="font-weight:600">${esc(p.name)}${e>0?` <span class="muted" style="font-size:11px;font-weight:700">est 1RM ${e}kg</span>`:''}</span>
       <span><b style="color:var(--warn)">${p.weight}kg</b> <span class="muted" style="font-size:12px">${p.reps?('× '+p.reps+'회 '):''}· ${p.date}</span></span></div>`;});
     html+=`</div>`;
   }
@@ -455,9 +466,27 @@ function endSession(){
   if(!confirm('운동을 종료할까요?'))return;
   s.endedAt=Date.now();
   s.durationSec=Math.max(0,Math.round((s.endedAt-s.startedAt)/1000));
+  s.prHits=sessionPRHits(s.id);  // 종료 정산: 이 세션에서 깬 신기록 집계
   DB.settings.activeSessionId=null;DB.settings.activeSessionDate=null;
   save();stopElapsed();renderAll();
-  toast('운동 종료 · 소요시간 '+fmtDur(s.durationSec));
+  showSessionSummary(s);
+}
+/* 운동 종료 요약 카드(시트) */
+function showSessionSummary(s){
+  const sum=sessionSummary(s);
+  let html=`<h3>오늘의 운동 💪</h3>
+    <div class="sum-grid">
+      <div class="sum"><div class="k">종목</div><div class="v">${sum.nEx}<small> 종목 · ${sum.nSets}세트</small></div></div>
+      <div class="sum"><div class="k">⏱ 소요시간</div><div class="v">${fmtDur(sum.durationSec)}</div></div>
+    </div>
+    <div class="sum mt8"><div class="k">📦 총 볼륨</div>
+      <div class="v">${sum.volume.toLocaleString()}<small> kg (${(sum.volume/1000).toFixed(1)}t)</small></div></div>`;
+  if(sum.prHits.length){
+    html+=`<div class="sum mt8" style="border-color:var(--warn)"><div class="k" style="color:var(--warn)">🎉 신기록 ${sum.prHits.length}개</div>
+      <div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--text-strong)">${sum.prHits.map(p=>esc(p.name)+' '+p.value+'kg').join(' · ')}</div></div>`;
+  }
+  html+=`<button class="btn mt12" onclick="closeSheet()">확인</button>`;
+  openSheet(html);
 }
 function elapsedSec(){const s=activeSession();return s?Math.max(0,Math.round((Date.now()-s.startedAt)/1000)):0;}
 function fmtDur(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60,z=n=>String(n).padStart(2,'0');
@@ -558,6 +587,56 @@ function allPRs(){
   });});}
   return Object.entries(best).map(([name,v])=>({name,weight:v.weight,reps:v.reps,date:v.date}))
     .sort((a,b)=>b.weight-a.weight);
+}
+
+/* ----- 추정 1RM (Epley) ----- */
+function epley(w,r){w=+w||0;r=+r||0;if(w<=0)return 0;return w*(1+r/30);}
+/* 종목의 모든 세트에서 추정 1RM 최댓값(소수1자리 반올림). 기록 없으면 0 */
+function est1RM(name){
+  let max=0;
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{if(ex.name!==name)return;
+    ex.sets.forEach(s=>{const e=epley(s.weight,s.reps);if(e>max)max=e;});});}
+  return Math.round(max*10)/10;
+}
+/* 3대 운동(스쿼트/벤치프레스/데드리프트) 추정 1RM. 이름 부분일치 */
+function bigThree(){
+  const want=[['스쿼트',['스쿼트']],['벤치프레스',['벤치']],['데드리프트',['데드']]];
+  const names=new Set();for(const d in DB.workouts)DB.workouts[d].forEach(ex=>names.add(ex.name));
+  return want.map(([label,keys])=>{
+    let max=0;names.forEach(n=>{if(keys.some(k=>n.includes(k))){const e=est1RM(n);if(e>max)max=e;}});
+    return {label,oneRM:Math.round(max*10)/10};
+  });
+}
+
+/* ----- 세션 신기록 집계 -----
+   세션에서 입력한 세트(sid 일치)들의 종목별 최대 무게를, 세션 외 과거 전체 기록과
+   비교해 갱신된 종목을 신기록으로 본다. 종료 정산용. */
+function sessionPRHits(sid){
+  const sessBest={};  // name -> {weight,reps}
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{ex.sets.forEach(s=>{
+    if(s.sid!==sid)return;const w=+s.weight||0;if(w<=0)return;
+    if(!sessBest[ex.name]||w>sessBest[ex.name].weight)sessBest[ex.name]={weight:w,reps:+s.reps||0};
+  });});}
+  const hits=[];
+  for(const name in sessBest){
+    const w=sessBest[name].weight;
+    let prior=0;  // 이 세션 외(다른 sid/과거)의 최대
+    for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{if(ex.name!==name)return;
+      ex.sets.forEach(s=>{if(s.sid===sid)return;const pw=+s.weight||0;if(pw>prior)prior=pw;});});}
+    if(w>prior)hits.push({name,kind:'weight',value:w});
+  }
+  return hits;
+}
+/* 세션 종료 요약 계산: 종목수·세트수·볼륨·소요시간·신기록 */
+function sessionSummary(s){
+  const sid=s.id;const byName={};let nSets=0,volume=0;
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    const sessSets=ex.sets.filter(st=>st.sid===sid);if(!sessSets.length)return;
+    byName[ex.name]=true;
+    sessSets.forEach(st=>{nSets++;volume+=(+st.weight||0)*(+st.reps||0);});
+  });}
+  return {nEx:Object.keys(byName).length,nSets,volume:Math.round(volume),
+    durationSec:s.durationSec||0,prHits:s.prHits||[]};
 }
 
 /* ============ 식단 ============ */
