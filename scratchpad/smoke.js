@@ -2037,5 +2037,73 @@ async function at(name,fn){try{await fn();pass++;console.log('  ok -',name);}cat
     assert(ev("viewBody()").includes('인바디 사진'),'인바디 첨부 버튼');
   });
 
+  await at('addSleep: 수면 분석 이미지 첨부 시 sleep.photo(kind=sleep) 저장 + 수치 병합',async()=>{
+    reset();ev("sleepPhotoPend={size:700000,type:'image/jpeg'};");
+    elCache['slDate']=makeEl();elCache['slDate'].value='2026-06-27';
+    elCache['slHours']=makeEl();elCache['slHours'].value='7.5';
+    elCache['slRem']=makeEl();elCache['slRem'].value='';
+    elCache['slDeep']=makeEl();elCache['slDeep'].value='';
+    elCache['slMemo']=makeEl();elCache['slMemo'].value='';
+    await ev("addSleep()");
+    const s=DB().sleep.find(x=>x.date==='2026-06-27');
+    assert(s.photo&&s.photo.id,'sleep.photo 메타 첨부');
+    assert.strictEqual(s.photo.kind,'sleep','kind=sleep');
+    assert.strictEqual(s.photo.date,'2026-06-27','date=수면 날짜');
+    assert.strictEqual(s.hours,7.5,'총수면 수치도 같이 저장');
+    assert.strictEqual(ev('sleepPhotoPend'),null,'대기 사진 비워짐');
+    delete elCache['slDate'];delete elCache['slHours'];delete elCache['slRem'];delete elCache['slDeep'];delete elCache['slMemo'];
+  });
+
+  await at('addSleep: 이미지만 있어도(수치 없음) 기록됨',async()=>{
+    reset();ev("sleepPhotoPend={size:600000,type:'image/jpeg'};");
+    elCache['slDate']=makeEl();elCache['slDate'].value='2026-06-27';
+    elCache['slHours']=makeEl();elCache['slHours'].value='';
+    elCache['slRem']=makeEl();elCache['slRem'].value='';
+    elCache['slDeep']=makeEl();elCache['slDeep'].value='';
+    elCache['slMemo']=makeEl();elCache['slMemo'].value='';
+    await ev("addSleep()");
+    const s=DB().sleep.find(x=>x.date==='2026-06-27');
+    assert(s&&s.photo&&s.photo.kind==='sleep','이미지만으로 기록');
+    delete elCache['slDate'];delete elCache['slHours'];delete elCache['slRem'];delete elCache['slDeep'];delete elCache['slMemo'];
+  });
+
+  await at('savePhoto: kind=sleep 메타 반환 + 비로그인 업로드 no-op(네트워크 0)',async()=>{
+    reset();
+    ev("__up=0;SYNC.uploadPhoto=function(){__up++;return Promise.resolve('X');};");
+    ctx.__f={size:800000,type:'image/jpeg'};
+    const meta=await ev("savePhoto('sleep','2026-06-27',__f)");
+    assert.strictEqual(meta.kind,'sleep','메타 kind=sleep');
+    assert.strictEqual(meta.path,undefined,'비로그인 → 업로드 안 됨(path 없음)');
+    assert.strictEqual(ev('__up'),0,'업로드 브리지 미호출(네트워크 0)');
+    const blob=await ev("idbGet('"+meta.id+"')");
+    assert(blob,'IndexedDB엔 로컬 사본 저장됨');
+  });
+
+  await at('delSleep: 사진 있는 수면 레코드 삭제 시 IndexedDB 사본도 제거',async()=>{
+    reset();ev("DB.sleep=[{date:'2026-06-27',hours:7,rem:null,deep:null,memo:null,photo:{id:'ps1',kind:'sleep',date:'2026-06-27'}}];save();");
+    ctx.__b={size:1,__blob:true};await ev("idbPut('ps1',__b)");
+    ev("delSleep(0)");
+    await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));
+    assert.strictEqual(await ev("idbGet('ps1')"),null,'sleep 사진 IndexedDB 정리');
+    assert.strictEqual(DB().sleep.length,0,'레코드도 삭제');
+  });
+
+  await at('viewSleep: 사진 있는 수면 레코드는 썸네일(data-photo) 렌더',async()=>{
+    reset();
+    ev("DB.sleep=[{date:'2026-06-27',hours:7.5,rem:1.5,deep:1.2,memo:null,photo:{id:'PS',kind:'sleep',date:'2026-06-27'}}];save();");
+    const vs=ev("viewSleep()");
+    assert(vs.includes('data-photo="PS"')&&vs.includes('thumb'),'수면 썸네일 렌더');
+    assert(vs.includes("viewPhoto('PS'"),'수면 사진 탭→뷰어');
+  });
+
+  await at('수면 이미지 UI: 파일 입력은 capture 없이 accept=image/* + 버튼 존재',async()=>{
+    reset();
+    const vs=ev("viewSleep()");
+    assert(vs.includes('id="sleepPhoto"'),'수면 파일 입력 존재');
+    assert(vs.includes('수면 분석 이미지'),'수면 첨부 버튼');
+    assert(/<input[^>]*id="sleepPhoto"[^>]*accept="image\/\*"/.test(vs),'accept=image/* 지정');
+    assert(!/<input[^>]*id="sleepPhoto"[^>]*capture/.test(vs),'capture 속성 없음(갤러리/구글포토 선택 가능)');
+  });
+
   console.log('\n'+pass+' passed'+(process.exitCode?' (with failures)':''));
 })();
