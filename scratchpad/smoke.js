@@ -1196,24 +1196,87 @@ t('세션 없음(stub: SIGNED_OUT 동등) → SYNC 꺼짐 + pulledAt 해제',()=
   assert.strictEqual(ev("getPulledAt()"),null,'pulledAt 해제');
 });
 
-t('cloudLogin: 잘못된 이메일이면 토스트, SYNC.login 미호출',()=>{
+t('cloudLogin: 잘못된 이메일이면 토스트, SYNC.sendOtp 미호출',()=>{
   reset();
-  ev("__loginCalls=[];SYNC.login=function(e){__loginCalls.push(e);};");
+  ev("__otpSend=[];SYNC.sendOtp=function(e){__otpSend.push(e);};");
   elCache['cloudEmail']=makeEl();elCache['cloudEmail'].value='not-an-email';
   clearSpies();
   ev("cloudLogin();");
-  assert.strictEqual(ev("__loginCalls.length"),0,'유효성 실패 시 로그인 시도 안 함');
+  assert.strictEqual(ev("__otpSend.length"),0,'유효성 실패 시 전송 시도 안 함');
   assert(toastList().length>=1,'안내 토스트');
   delete elCache['cloudEmail'];
 });
 
-t('cloudLogin: 올바른 이메일이면 SYNC.login(email) 호출',()=>{
+t('cloudLogin: 올바른 이메일이면 SYNC.sendOtp(email) 호출(1단계)',()=>{
   reset();
-  ev("__loginCalls=[];SYNC.login=function(e){__loginCalls.push(e);};");
+  ev("__otpSend=[];SYNC.sendOtp=function(e){__otpSend.push(e);};");
   elCache['cloudEmail']=makeEl();elCache['cloudEmail'].value=' you@example.com ';
   ev("cloudLogin();");
-  assert.strictEqual(ev("__loginCalls[0]"),'you@example.com','trim 후 전달');
+  assert.strictEqual(ev("__otpSend[0]"),'you@example.com','trim 후 전달');
   delete elCache['cloudEmail'];
+});
+
+/* ---- OTP 2단계: 코드 입력/검증/재전송/이메일수정 ---- */
+t('viewCloudSync: otpEmail 설정 시 2단계(코드 입력칸·확인·재전송·수정) 렌더',()=>{
+  reset();
+  ev("supa={};SYNC.enabled=false;SYNC.otpEmail='me@example.com';");
+  const v=ev("viewCloudSync()");
+  assert(v.includes('me@example.com'),'발송 이메일 표기');
+  assert(v.includes('6자리 코드'),'코드 안내 문구');
+  assert(v.includes('id="cloudCode"'),'코드 입력칸');
+  assert(v.includes('cloudVerify()'),'확인 버튼');
+  assert(v.includes('cloudResend()'),'재전송 버튼');
+  assert(v.includes('cloudEditEmail()'),'이메일 수정 버튼');
+  assert(!v.includes('id="cloudEmail"'),'2단계에선 이메일 입력칸 미표시');
+  ev("delete supa;SYNC.otpEmail=null;");
+});
+
+t('viewCloudSync: otpEmail 없으면 1단계(이메일 입력·인증코드 받기) 렌더',()=>{
+  reset();
+  ev("supa={};SYNC.enabled=false;SYNC.otpEmail=null;");
+  const v=ev("viewCloudSync()");
+  assert(v.includes('id="cloudEmail"'),'이메일 입력칸');
+  assert(v.includes('인증코드 받기'),'1단계 버튼');
+  assert(!v.includes('id="cloudCode"'),'1단계엔 코드 입력칸 없음');
+  ev("delete supa;");
+});
+
+t('cloudVerify: 6자리 아니면 토스트, SYNC.verifyOtp 미호출',()=>{
+  reset();
+  ev("__otpVer=[];SYNC.otpEmail='me@example.com';SYNC.verifyOtp=function(t){__otpVer.push(t);};");
+  elCache['cloudCode']=makeEl();elCache['cloudCode'].value='123';
+  clearSpies();
+  ev("cloudVerify();");
+  assert.strictEqual(ev("__otpVer.length"),0,'형식 불일치 시 검증 안 함');
+  assert(toastList().length>=1,'안내 토스트');
+  delete elCache['cloudCode'];ev("SYNC.otpEmail=null;");
+});
+
+t('cloudVerify: 6자리 코드면 SYNC.verifyOtp(token) 호출(trim)',()=>{
+  reset();
+  ev("__otpVer=[];SYNC.otpEmail='me@example.com';SYNC.verifyOtp=function(t){__otpVer.push(t);};");
+  elCache['cloudCode']=makeEl();elCache['cloudCode'].value=' 654321 ';
+  ev("cloudVerify();");
+  assert.strictEqual(ev("__otpVer[0]"),'654321','trim 후 6자리 전달');
+  delete elCache['cloudCode'];ev("SYNC.otpEmail=null;");
+});
+
+t('cloudResend: otpEmail 있으면 같은 이메일로 sendOtp 재호출',()=>{
+  reset();
+  ev("__otpSend=[];SYNC.otpEmail='me@example.com';SYNC.sendOtp=function(e){__otpSend.push(e);};");
+  ev("cloudResend();");
+  assert.strictEqual(ev("__otpSend[0]"),'me@example.com','동일 이메일 재전송');
+  ev("SYNC.otpEmail=null;");
+});
+
+t('cloudEditEmail: otpEmail 초기화 → 1단계로 복귀',()=>{
+  reset();
+  ev("supa={};SYNC.otpEmail='me@example.com';");
+  ev("cloudEditEmail();");
+  assert.strictEqual(ev("SYNC.otpEmail"),null,'otpEmail 해제');
+  const v=ev("viewCloudSync()");
+  assert(v.includes('id="cloudEmail"'),'이메일 입력칸 복귀');
+  ev("delete supa;");
 });
 
 t('viewMe(): supa 미설정이면 동기화 카드가 "꺼짐" 안내를 보여줌',()=>{
