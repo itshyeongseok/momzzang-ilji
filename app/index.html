@@ -98,10 +98,14 @@ textarea{resize:vertical;min-height:54px}
 .ex{background:var(--surface2);border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:10px}
 .ex-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .ex-head .name{font-weight:700;font-size:15px;flex:1}
-.setline{display:grid;grid-template-columns:26px 1fr 1fr auto;gap:7px;align-items:center;margin-bottom:6px}
+.setline{display:grid;grid-template-columns:26px 1fr 1fr 36px auto;gap:7px;align-items:center;margin-bottom:6px;border-radius:9px;padding:2px}
+.setline.set-done{background:var(--accent-soft)}
 .setline .n{color:var(--muted);font-size:13px;font-weight:700;text-align:center}
 .setline input{padding:9px 10px;text-align:center}
 .set-unit{font-size:11px;color:var(--muted);text-align:center}
+.set-check{width:30px;height:30px;border-radius:8px;border:2px solid var(--line);background:var(--surface2);
+  display:grid;place-items:center;font-size:15px;color:transparent;cursor:pointer;padding:0}
+.set-check.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
 /* habit */
 .habit{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
@@ -514,11 +518,12 @@ function viewWorkout(){
     html+=`<div class="ex"><div class="ex-head"><span class="name">${esc(ex.name)}${best>0?` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆${best}kg</span>`:''}</span>
       <button class="btn sm sec" onclick="addSet(${i})">+ 세트</button>
       <button class="x" onclick="delEx(${i})">✕</button></div>
-      <div class="setline"><div class="n"></div><div class="set-unit">무게(kg)</div><div class="set-unit">횟수</div><div></div></div>`;
+      <div class="setline"><div class="n"></div><div class="set-unit">무게(kg)</div><div class="set-unit">횟수</div><div class="set-unit">완료</div><div></div></div>`;
     ex.sets.forEach((s,j)=>{
-      html+=`<div class="setline"><div class="n">${j+1}</div>
+      html+=`<div class="setline${s.done?' set-done':''}"><div class="n">${j+1}</div>
         <input type="number" inputmode="decimal" value="${s.weight??''}" placeholder="0" onchange="setVal(${i},${j},'weight',this.value)">
         <input type="number" inputmode="numeric" value="${s.reps??''}" placeholder="0" onchange="setVal(${i},${j},'reps',this.value)">
+        <button class="set-check${s.done?' on':''}" onclick="toggleSetDone(${i},${j})" aria-label="세트 완료">✓</button>
         <button class="x" onclick="delSet(${i},${j})">✕</button></div>`;
     });
     html+=`</div>`;
@@ -554,10 +559,13 @@ function lastWorkoutBefore(date){
 function addEx(){const n=document.getElementById('exName').value.trim();if(!n)return;quickEx(n);}
 function curSid(){return (isSessionActive()&&DB.settings.activeSessionDate===cur)?DB.settings.activeSessionId:undefined;}
 function quickEx(name){if(!DB.workouts[cur])DB.workouts[cur]=[];
-  DB.workouts[cur].push({name,sets:[{weight:'',reps:'',sid:curSid()}]});save();renderAll();}
+  DB.workouts[cur].push({name,sets:[{weight:'',reps:'',done:false,sid:curSid()}]});save();renderAll();}
 function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
-  sets.push({weight:last.weight||'',reps:last.reps||'',sid:curSid()});save();renderAll();
-  if(DB.settings.autoRest!==false)startRest(restDefault());}
+  sets.push({weight:last.weight||'',reps:last.reps||'',done:false,sid:curSid()});save();renderAll();}
+/* 번핏식: 세트 '완료 체크' 토글. 미완료→완료로 켤 때 자동휴식(autoRest) 시작 */
+function toggleSetDone(i,j){const set=DB.workouts[cur][i].sets[j];const nowDone=!set.done;
+  set.done=nowDone;save();renderAll();
+  if(nowDone && DB.settings.autoRest!==false)startRest(restDefault());}
 function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
   if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
 function delEx(i){DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
@@ -956,7 +964,7 @@ function openRestPicker(){
       </div>
       <div class="row mt12" style="align-items:center;gap:9px">
         <input type="checkbox" id="autoRest" ${DB.settings.autoRest!==false?'checked':''} onchange="setAutoRest(this.checked)" style="width:20px;height:20px;flex:none">
-        <label for="autoRest" style="font-size:14px">'+ 세트' 누르면 자동으로 휴식 시작</label>
+        <label for="autoRest" style="font-size:14px">세트 완료 체크하면 자동으로 휴식 시작</label>
       </div>`;
   }
   html+=`<button class="btn sec mt12" onclick="closeSheet()">닫기</button>`;
