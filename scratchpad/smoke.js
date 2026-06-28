@@ -1513,6 +1513,58 @@ t('endSession → showSessionSummary가 인사이트 시트를 연다(무에러)
   assert(v.includes('근육 피로도 맵'),'시트에 피로도 맵');
 });
 
+/* ========== 신규(meal-presets): 고형석 표준식 빠른 추가 프리셋 ========== */
+t('MEAL_PRESETS 값 정확(오트밀 176/9, 쉐이크 216/28)',()=>{
+  reset();
+  assert.strictEqual(ev('MEAL_PRESETS.length'),2,'프리셋 2개');
+  const oat=ev("MEAL_PRESETS.find(p=>p.name==='오트밀')");
+  assert.strictEqual(oat.kcal,176,'오트밀 176kcal');
+  assert.strictEqual(oat.protein,9,'오트밀 단백 9g');
+  assert(oat.memo.includes('오버나이트'),'오트밀 메모');
+  const sh=ev("MEAL_PRESETS.find(p=>p.name==='쉐이크')");
+  assert.strictEqual(sh.kcal,216,'쉐이크 216kcal');
+  assert.strictEqual(sh.protein,28,'쉐이크 단백 28g');
+  assert(sh.memo.includes('파우더35g'),'쉐이크 메모');
+});
+
+t('addPreset: 현재 끼니(curMT)로 올바른 식단 항목 생성',()=>{
+  reset();ev("curMT='아침';");
+  ev('addPreset(0)'); // 오트밀
+  const m=DB().meals['2026-06-27'][0];
+  assert.strictEqual(m.type,'아침','끼니 type 반영');
+  assert.strictEqual(m.memo,ev('MEAL_PRESETS[0].memo'),'메모 채움');
+  assert.strictEqual(m.kcal,'176','kcal 채움(문자열)');
+  assert.strictEqual(m.protein,'9','protein 채움(문자열)');
+  assert.strictEqual(m.photo,null,'사진 없음');
+});
+
+t('addPreset: 끼니 변경(curMT) 반영 + 쉐이크 값',()=>{
+  reset();ev("curMT='간식';");
+  ev('addPreset(1)'); // 쉐이크
+  const m=DB().meals['2026-06-27'][0];
+  assert.strictEqual(m.type,'간식','간식으로 type 반영');
+  assert.strictEqual(m.kcal,'216');
+  assert.strictEqual(m.protein,'28');
+});
+
+t('addPreset: 같은 날 누적 + 합계 반영(viewMeal)',()=>{
+  reset();ev("curMT='아침';addPreset(0);addPreset(1);");
+  assert.strictEqual(DB().meals['2026-06-27'].length,2,'두 항목 누적');
+  // 합계: 176+216=392 kcal, 9+28=37 g
+  const v=ev('viewMeal()');
+  assert(v.includes('392kcal'),'합계 kcal');
+  assert(v.includes('단백 37g'),'합계 단백질');
+});
+
+t('식단 추가 카드에 프리셋 칩 렌더(오트밀/쉐이크)',()=>{
+  reset();
+  const v=ev('viewMeal()');
+  assert(v.includes('🥣 오트밀'),'오트밀 칩');
+  assert(v.includes('🥤 쉐이크'),'쉐이크 칩');
+  assert(v.includes('addPreset(0)')&&v.includes('addPreset(1)'),'프리셋 핸들러');
+  assert(v.includes('빠른 추가'),'빠른 추가 라벨');
+});
+
 console.log('\n'+pass+' passed (sync)');
 
 /* ========== 비동기(사진 흐름): IndexedDB·압축·업로드 가드 ========== */
