@@ -349,7 +349,6 @@ const SYNC={
   enabled:false,        // 로그인+supa 준비됐을 때만 module이 true로
   email:null,           // 로그인된 이메일(상태표시용)
   onLocalChange(){},    // module이 debounce push 핸들러로 교체
-  otpEmail:null,        // OTP 코드 발송 중인 이메일(2단계 입력 대기). null이면 1단계(이메일 입력).
 };
 window.SYNC=SYNC;        // module(supabase-js) 블록에서 참조하도록 노출(const는 자동 전역 아님)
 const PULLED_KEY='sync_pulledAt';
@@ -859,7 +858,7 @@ function viewMe(){
   return html;
 }
 
-/* 클라우드 동기화 카드. 세 상태: (a)미설정/불가 → 안내만 (b)미로그인 → 이메일 입력
+/* 클라우드 동기화 카드. 세 상태: (a)미설정/불가 → 안내만 (b)미로그인 → 이메일+비밀번호 폼
    (c)로그인됨 → 상태표시+로그아웃. 비활성 경로는 네트워크 0(로컬 우선 불변). */
 function cloudReady(){return typeof supa!=='undefined' && !!supa;}
 function viewCloudSync(){
@@ -873,48 +872,39 @@ function viewCloudSync(){
         <b style="color:var(--good)">● 동기화 켜짐</b><br>
         <span style="font-size:12px">${esc(SYNC.email||'')} 로 로그인됨. 기록이 자동으로 안전하게 백업·동기화돼요.</span></div>
       <button class="btn sec" onclick="cloudLogout()">로그아웃</button>`;
-  }else if(SYNC.otpEmail){
-    // 2단계: 메일로 받은 6자리 코드 입력 → 확인
-    html+=`<div class="muted" style="font-size:13px;margin-bottom:10px"><b style="color:var(--text)">${esc(SYNC.otpEmail)}</b> 로 6자리 코드를 보냈어요 📧<br>
-        <span style="font-size:12px">메일을 확인하고 코드를 입력하세요. (비밀번호 없음)</span></div>
-      <label class="fld">인증코드 (6자리)</label>
-      <div class="row" style="gap:8px">
-        <input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" id="cloudCode" placeholder="000000">
-        <button class="btn sm" style="white-space:nowrap" onclick="cloudVerify()">확인</button>
-      </div>
-      <div class="row" style="gap:8px;margin-top:8px">
-        <button class="btn sec sm" onclick="cloudResend()">코드 재전송</button>
-        <button class="btn sec sm" onclick="cloudEditEmail()">이메일 수정</button>
-      </div>`;
   }else{
-    // 1단계: 이메일 입력 → 인증코드 받기
-    html+=`<div class="muted" style="font-size:13px;margin-bottom:10px">이메일을 입력하면 6자리 인증코드를 보내드려요. 코드를 앱에 입력하면 이 폰의 기록이 클라우드와 동기화돼요. (비밀번호 없음)</div>
+    // 이메일 + 비밀번호 로그인. 자격 오류이고 신규면 "새로 시작하기"(가입)로 유도.
+    html+=`<div class="muted" style="font-size:13px;margin-bottom:10px">이메일과 비밀번호로 로그인하면 이 폰의 기록이 클라우드와 동기화돼요. 처음이라면 같은 칸에 입력하고 <b style="color:var(--text)">새로 시작하기</b>를 누르세요. (비밀번호 6자 이상)</div>
       <label class="fld">이메일</label>
-      <div class="row" style="gap:8px">
-        <input type="email" inputmode="email" id="cloudEmail" placeholder="you@example.com">
-        <button class="btn sm" style="white-space:nowrap" onclick="cloudLogin()">인증코드 받기</button>
-      </div>`;
+      <input type="email" inputmode="email" autocomplete="email" id="cloudEmail" placeholder="you@example.com">
+      <label class="fld mt8">비밀번호</label>
+      <input type="password" autocomplete="current-password" id="cloudPw" placeholder="비밀번호 (6자 이상)">
+      <button class="btn mt8" onclick="cloudLogin()">로그인</button>
+      <button class="btn sec mt8" onclick="cloudSignup()">이 이메일로 새로 시작하기</button>`;
   }
   html+=`</div>`;
   return html;
 }
-/* 아래 핸들러들은 module(supa)이 제공하는 SYNC.sendOtp/SYNC.verifyOtp/SYNC.logout 로 위임.
+/* 아래 핸들러들은 module(supa)이 제공하는 SYNC.signIn/SYNC.signUp/SYNC.logout 로 위임.
    supa 없을 땐 호출될 일이 없음(카드가 안 그려짐).
-   로그인 흐름은 2단계: (1) cloudLogin=이메일→인증코드 받기 (2) cloudVerify=코드 확인. */
+   흐름: cloudLogin=로그인 시도, cloudSignup=신규 가입(이메일 확인 비활성 가정 → 즉시 세션). */
+function cloudCreds(){
+  const e=document.getElementById('cloudEmail');
+  const p=document.getElementById('cloudPw');
+  return {email:e?(e.value||'').trim():'', pw:p?(p.value||''):''};
+}
 function cloudLogin(){
-  const el=document.getElementById('cloudEmail');
-  const email=el?(el.value||'').trim():'';
+  const {email,pw}=cloudCreds();
   if(!email||!email.includes('@')){toast('이메일을 입력해주세요');return;}
-  if(SYNC.sendOtp)SYNC.sendOtp(email);
+  if(pw.length<6){toast('비밀번호는 6자 이상이에요');return;}
+  if(SYNC.signIn)SYNC.signIn(email,pw);
 }
-function cloudVerify(){
-  const el=document.getElementById('cloudCode');
-  const code=el?(el.value||'').trim():'';
-  if(!/^\d{6}$/.test(code)){toast('6자리 코드를 입력해주세요');return;}
-  if(SYNC.verifyOtp)SYNC.verifyOtp(code);
+function cloudSignup(){
+  const {email,pw}=cloudCreds();
+  if(!email||!email.includes('@')){toast('이메일을 입력해주세요');return;}
+  if(pw.length<6){toast('비밀번호는 6자 이상이에요');return;}
+  if(SYNC.signUp)SYNC.signUp(email,pw);
 }
-function cloudResend(){if(SYNC.otpEmail&&SYNC.sendOtp)SYNC.sendOtp(SYNC.otpEmail);}
-function cloudEditEmail(){SYNC.otpEmail=null;renderAll();}
 function cloudLogout(){if(SYNC.logout)SYNC.logout();}
 
 /* ============ 운동일지 ============ */
@@ -2078,45 +2068,53 @@ async function onSession(session,doPull){
   if(session){
     SYNC.enabled=true;
     SYNC.email=session.user.email||null;
-    SYNC.otpEmail=null;                 // 세션 수립 시 코드 입력 단계 종료
     if(doPull!==false)await pull();
   }else{
     SYNC.enabled=false;SYNC.email=null;
-    SYNC.otpEmail=null;                 // 로그아웃 시 1단계(이메일 입력)로 복귀
     window.setPulledAt(null);
   }
   SYNC.onLocalChange=schedulePush;
   if(window.renderAll)window.renderAll();
 }
 
-// 클래식 스크립트의 UI(cloudLogin/cloudVerify/cloudLogout)가 부르는 진입점.
-// 로그인은 2단계: (1) sendOtp=이메일로 6자리 코드 발송 (2) verifyOtp=코드 검증→세션.
-// 매직링크 대신 OTP 코드: 앱 안에서 코드를 입력하므로 브라우저 전환이 없다(엉뚱한 브라우저로
-// 링크가 열리는 문제 제거). emailRedirectTo 는 남겨둬 혹시 링크로 와도 detectSessionInUrl 로 동작.
-SYNC.sendOtp=async (email)=>{
+// 클래식 스크립트의 UI(cloudLogin/cloudSignup/cloudLogout)가 부르는 진입점.
+// 로그인은 1단계: 이메일+비밀번호. OTP/매직링크 대신 비밀번호 → 메일 발송 자체가 0
+// (Supabase가 커스텀 SMTP 없이는 OTP 템플릿 편집을 막아, 1인 앱엔 비밀번호가 가장 단순·확실).
+// signUp 은 "Confirm email" OFF 가정이라 가입 즉시 세션이 와서 바로 로그인된다.
+SYNC.signIn=async (email,password)=>{
   if(!supa){window.toast&&window.toast('동기화를 사용할 수 없어요');return;}
   try{
-    const {error}=await supa.auth.signInWithOtp({
-      email, options:{shouldCreateUser:true, emailRedirectTo:location.origin+location.pathname}
-    });
-    if(error){window.toast&&window.toast('전송 실패: 잠시 후 다시');return;}
-    SYNC.otpEmail=email;                 // 2단계(코드 입력) 진입
-    window.toast&&window.toast('메일로 6자리 코드를 보냈어요 📧');
-    if(window.renderAll)window.renderAll();
-  }catch(e){window.toast&&window.toast('전송 실패: 잠시 후 다시');}
-};
-SYNC.verifyOtp=async (token)=>{
-  if(!supa){window.toast&&window.toast('동기화를 사용할 수 없어요');return;}
-  if(!SYNC.otpEmail){window.toast&&window.toast('먼저 인증코드를 받아주세요');return;}
-  try{
-    const {data,error}=await supa.auth.verifyOtp({email:SYNC.otpEmail, token, type:'email'});
+    const {data,error}=await supa.auth.signInWithPassword({email,password});
     if(error||!(data&&data.session)){
-      window.toast&&window.toast('코드가 올바르지 않아요. 다시 확인해주세요');return;
+      window.toast&&window.toast('이메일/비밀번호를 확인해주세요. 처음이면 "새로 시작하기"를 눌러주세요');return;
     }
-    SYNC.otpEmail=null;                  // 검증 성공 → 입력 단계 종료
     await onSession(data.session);       // 기존 세션 흐름(동기화 켜짐)
     window.toast&&window.toast('로그인됐어요 ☁️');
-  }catch(e){window.toast&&window.toast('코드 확인에 실패했어요. 잠시 후 다시');}
+  }catch(e){window.toast&&window.toast('로그인에 실패했어요. 잠시 후 다시');}
+};
+SYNC.signUp=async (email,password)=>{
+  if(!supa){window.toast&&window.toast('동기화를 사용할 수 없어요');return;}
+  if((password||'').length<6){window.toast&&window.toast('비밀번호는 6자 이상이에요');return;}
+  try{
+    const {data,error}=await supa.auth.signUp({email,password});
+    if(error){
+      const m=(error.message||'').toLowerCase();
+      if(m.includes('already')||m.includes('registered')){
+        window.toast&&window.toast('이미 가입된 이메일이에요. "로그인"을 눌러주세요');
+      }else if(m.includes('password')||m.includes('weak')){
+        window.toast&&window.toast('비밀번호가 너무 약해요. 더 길게 해주세요');
+      }else{
+        window.toast&&window.toast('가입에 실패했어요. 잠시 후 다시');
+      }
+      return;
+    }
+    if(data&&data.session){              // Confirm email OFF → 즉시 세션
+      await onSession(data.session);
+      window.toast&&window.toast('계정을 만들고 로그인했어요 ☁️');
+    }else{                              // (혹시 Confirm email ON이면 세션 없이 옴)
+      window.toast&&window.toast('확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해주세요');
+    }
+  }catch(e){window.toast&&window.toast('가입에 실패했어요. 잠시 후 다시');}
 };
 SYNC.logout=async ()=>{
   try{await supa.auth.signOut();}catch(e){}
