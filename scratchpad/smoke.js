@@ -1629,6 +1629,131 @@ t('식단 추가 카드에 프리셋 칩 렌더(오트밀/쉐이크)',()=>{
   assert(v.includes('빠른 추가'),'빠른 추가 라벨');
 });
 
+/* ========== 신규(sleep PR-1): 수면 데이터 모델 + 습관 분리(멱등 마이그레이션) ========== */
+t('DEFAULT.sleep=[] 신설 + 옛 백업에도 폴백 보장',()=>{
+  reset();
+  assert(Array.isArray(DB().sleep),'DEFAULT에 sleep:[]');
+  assert.strictEqual(DB().sleep.length,0,'기본 빈 배열');
+  // sleep 키가 빠진 옛 백업 → load 폴백으로 빈 배열 생성
+  ev("DB=Object.assign(structuredClone(DEFAULT),{workouts:{},meals:{},habits:{},body:[],settings:{}});delete DB.sleep;save();");
+  ev("DB=load();save();");
+  assert(Array.isArray(DB().sleep),'옛 백업도 load 후 sleep 폴백');
+});
+
+t('habitDefs/DEFAULT.habitDefs 에 sleep 항목이 없다',()=>{
+  reset();
+  assert.strictEqual(ev("DEFAULT.habitDefs.some(d=>d.id==='sleep')"),false,'DEFAULT에 sleep 습관 없음');
+  assert.strictEqual(ev("DB.habitDefs.some(d=>d.id==='sleep')"),false,'현재 DB에도 없음');
+  // 물 등 다른 습관은 보존
+  assert(ev("DB.habitDefs.some(d=>d.id==='water')"),'물 습관 보존');
+  assert(ev("DB.habitDefs.some(d=>d.id==='protein')"),'단백질 습관 보존');
+});
+
+t('migrateSleep: habits[date].sleep(숫자) → DB.sleep{date,hours} 이관 + 다른 습관 보존',()=>{
+  reset();
+  ev("DB.habits['2026-06-20']={sleep:8,water:2};save();");
+  ev('migrateSleep()');
+  const rec=DB().sleep.find(s=>s.date==='2026-06-20');
+  assert(rec,'이관된 수면 레코드 존재');
+  assert.strictEqual(rec.hours,8,'hours=8 이관');
+  assert.strictEqual(rec.rem,null,'rem 기본 null');
+  assert.strictEqual(rec.deep,null,'deep 기본 null');
+  assert.strictEqual(rec.photo,null,'photo 기본 null');
+  assert.strictEqual(DB().habits['2026-06-20'].sleep,undefined,'habits.sleep 삭제됨');
+  assert.strictEqual(DB().habits['2026-06-20'].water,2,'다른 습관(물) 보존');
+  assert.strictEqual(DB().settings.sleepMigrated,true,'sleepMigrated 플래그 세팅');
+});
+
+t('migrateSleep: 수면만 있던 날짜는 이관 후 날짜 객체 정리',()=>{
+  reset();
+  ev("DB.habits['2026-06-21']={sleep:7};save();");
+  ev('migrateSleep()');
+  assert(!DB().habits['2026-06-21'],'수면뿐이던 날짜는 빈 객체로 남지 않고 정리');
+  assert.strictEqual(DB().sleep.find(s=>s.date==='2026-06-21').hours,7,'7시간 이관');
+});
+
+t('migrateSleep: 멱등 — 두 번 호출해도 중복/변형 없음',()=>{
+  reset();
+  ev("DB.habits['2026-06-20']={sleep:8};save();");
+  ev('migrateSleep()');
+  const after1=JSON.stringify(DB().sleep);
+  ev('migrateSleep()');
+  assert.strictEqual(JSON.stringify(DB().sleep),after1,'재호출해도 sleep 불변');
+  assert.strictEqual(DB().sleep.filter(s=>s.date==='2026-06-20').length,1,'중복 레코드 없음');
+});
+
+t('migrateSleep: 플래그 true면 스킵(이후 들어온 habits.sleep 은 건드리지 않음)',()=>{
+  reset();
+  ev("DB.settings.sleepMigrated=true;DB.habits['2026-06-22']={sleep:6};save();");
+  ev('migrateSleep()');
+  // 이미 마이그레이션 완료 표시라 새 habits.sleep 은 이관되지 않음(정상: 습관 UI엔 수면이 없어 발생 불가)
+  assert.strictEqual(DB().habits['2026-06-22'].sleep,6,'플래그 true면 habits.sleep 유지');
+  assert.strictEqual(DB().sleep.length,0,'이관 안 함');
+});
+
+t('migrateSleep: 이미 DB.sleep에 같은 날짜(hours 있음) 있으면 덮어쓰지 않음',()=>{
+  reset();
+  ev("DB.sleep=[{date:'2026-06-20',hours:7.5,rem:1.5,deep:1.2,memo:'먼저 기록',photo:null}];");
+  ev("DB.habits['2026-06-20']={sleep:8};save();");
+  ev('migrateSleep()');
+  const rec=DB().sleep.find(s=>s.date==='2026-06-20');
+  assert.strictEqual(rec.hours,7.5,'기존 hours 보호(습관값으로 덮어쓰지 않음)');
+  assert.strictEqual(rec.rem,1.5,'기존 rem 보존');
+  assert.strictEqual(DB().habits['2026-06-20'],undefined,'habits.sleep 은 정리됨');
+});
+
+t('migrateSleep: DB.sleep에 같은 날짜 있으나 hours 비었으면 습관값으로 채움',()=>{
+  reset();
+  ev("DB.sleep=[{date:'2026-06-20',hours:null,rem:2,deep:null,memo:null,photo:null}];");
+  ev("DB.habits['2026-06-20']={sleep:8};save();");
+  ev('migrateSleep()');
+  const rec=DB().sleep.find(s=>s.date==='2026-06-20');
+  assert.strictEqual(rec.hours,8,'비어있던 hours를 습관값으로 채움');
+  assert.strictEqual(rec.rem,2,'기존 rem 보존');
+});
+
+t('migrateSleep: 0/빈 수면값은 이관하지 않되 정리는 한다',()=>{
+  reset();
+  ev("DB.habits['2026-06-20']={sleep:0,water:1};save();");
+  ev('migrateSleep()');
+  assert.strictEqual(DB().sleep.length,0,'0시간은 레코드 안 만듦');
+  assert.strictEqual(DB().habits['2026-06-20'].sleep,undefined,'그래도 habits.sleep 키는 제거');
+  assert.strictEqual(DB().habits['2026-06-20'].water,1,'다른 습관 보존');
+});
+
+t('migrateSleep: habitDefs에 되살아난 sleep 항목 제거(옛 백업 시나리오)',()=>{
+  reset();
+  ev("DB.settings.sleepMigrated=true;DB.habitDefs.unshift({id:'sleep',name:'수면',type:'num',unit:'시간',step:0.5,icon:'😴'});save();");
+  ev('migrateSleep()');
+  assert.strictEqual(DB().habitDefs.some(d=>d.id==='sleep'),false,'플래그 true여도 habitDefs의 sleep 제거');
+});
+
+t('importData(옛 백업): sleepMigrated 없는 백업 import 시 마이그레이션 재실행',()=>{
+  reset();
+  // 옛 백업 JSON(수면=습관, sleep 배열·플래그 없음)을 import 경로로 적용
+  const backup=JSON.stringify({
+    workouts:{},meals:{},habits:{'2026-06-15':{sleep:7.5,water:3}},body:[],settings:{},
+    habitDefs:[{id:'sleep',name:'수면',type:'num',unit:'시간',step:0.5,icon:'😴'},{id:'water',name:'물',type:'num',unit:'컵',step:1,icon:'💧'}]
+  });
+  ev("(function(){var d="+backup+";DB=Object.assign(structuredClone(DEFAULT),d);migrateSleep();})()");
+  const rec=DB().sleep.find(s=>s.date==='2026-06-15');
+  assert(rec&&rec.hours===7.5,'옛 백업의 습관 수면이 DB.sleep로 이관');
+  assert.strictEqual(DB().habits['2026-06-15'].sleep,undefined,'habits.sleep 제거');
+  assert.strictEqual(DB().habits['2026-06-15'].water,3,'물 보존');
+  assert.strictEqual(DB().habitDefs.some(d=>d.id==='sleep'),false,'habitDefs sleep 제거');
+  assert.strictEqual(DB().settings.sleepMigrated,true,'플래그 세팅');
+});
+
+t('importData(옛 백업, sleep 키 없음): 폴백으로 빈 배열 + 앱 안 깨짐',()=>{
+  reset();
+  const backup=JSON.stringify({workouts:{},meals:{},habits:{},body:[],settings:{},habitDefs:[{id:'water',name:'물',type:'num',unit:'컵',step:1,icon:'💧'}]});
+  ev("(function(){var d="+backup+";DB=Object.assign(structuredClone(DEFAULT),d);migrateSleep();})()");
+  assert(Array.isArray(DB().sleep),'sleep 폴백 빈 배열');
+  // 렌더 무에러
+  ev("setTab('me')");
+  assert(ctx.document.getElementById('view').innerHTML.length>0,'프로필 렌더 무에러');
+});
+
 console.log('\n'+pass+' passed (sync)');
 
 /* ========== 비동기(사진 흐름): IndexedDB·압축·업로드 가드 ========== */
