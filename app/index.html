@@ -1792,10 +1792,19 @@ const SUPA_URL  = 'https://gjiyfgkswbzjfkibvwva.supabase.co';
 const SUPA_ANON = 'sb_publishable_FYyY0rzyfbgxi2iIvUIQbQ_GtzDtarT';
 
 // https 환경 + 설정값이 있을 때만 클라이언트 생성. 아니면 supa=null → 동기화 전부 no-op.
+// auth 옵션 명시: 새로고침/앱 재실행에도 세션이 localStorage 에서 복원되고(persistSession),
+// 토큰이 자동 갱신돼(autoRefreshToken) "한 번 로그인하면 계속 유지"되게 한다. (기본값이지만 명시)
 let supa=null;
 try{
   if(SUPA_URL && SUPA_ANON && location.protocol==='https:'){
-    supa=createClient(SUPA_URL,SUPA_ANON);
+    supa=createClient(SUPA_URL,SUPA_ANON,{
+      auth:{
+        persistSession:true,        // 세션을 storage 에 저장 → 재방문 시 복원
+        autoRefreshToken:true,      // 만료 전 토큰 자동 갱신 → 장기 유지
+        detectSessionInUrl:true,    // 매직링크 복귀 URL 해시에서 세션 추출
+        storage:window.localStorage // 같은 origin 이면 새로고침/재실행에도 보존
+      }
+    });
   }
 }catch(e){supa=null;}
 window.supa=supa;  // viewCloudSync()의 cloudReady() 가 참조
@@ -1842,13 +1851,23 @@ async function pull(){
   }catch(e){/* 네트워크 실패: 로컬 그대로 */}
 }
 
-// 세션 수립/해제 처리.
-async function onSession(session){
+// 매직링크 복귀 후 URL 해시(#access_token=... 등)를 정리해 새로고침 시 깔끔하게.
+// 세션은 이미 localStorage 에 저장됐으므로 해시는 더 이상 필요 없다.
+function cleanAuthHash(){
+  try{
+    if(location.hash && /access_token|error_description/.test(location.hash)){
+      history.replaceState(null,'',location.pathname+location.search);
+    }
+  }catch(e){/* history 미가용 등 무시 */}
+}
+
+// 세션 수립/해제 처리. doPull=false 면 pull 없이 상태/UI 만 갱신(토큰 갱신 등 중복 pull 방지).
+async function onSession(session,doPull){
   SYNC.session=session;
   if(session){
     SYNC.enabled=true;
     SYNC.email=session.user.email||null;
-    await pull();
+    if(doPull!==false)await pull();
   }else{
     SYNC.enabled=false;SYNC.email=null;
     window.setPulledAt(null);
@@ -1893,12 +1912,25 @@ SYNC.signedUrl=async (path)=>{
   return error?null:(data&&data.signedUrl);
 };
 
-// 초기화: 매직링크 복귀 세션 포함 현재 세션 확인 + 변경 구독.
+// 초기화: 앱 로드 시 저장된 세션을 먼저 복원(일반 새로고침/앱 재실행에서도) +
+// 매직링크 복귀(detectSessionInUrl) 및 토큰 갱신을 onAuthStateChange 로 처리.
 if(supa){
   try{
+    // getSession() 은 localStorage 에 저장된 세션을 복원한다. 해시가 없어도(=일반
+    // 새로고침) 세션이 있으면 동기화가 켜진다 — 이것이 "로그인 유지"의 핵심.
     const {data}=await supa.auth.getSession();
     await onSession(data?data.session:null);
-    supa.auth.onAuthStateChange((_e,session)=>{onSession(session);});
+    cleanAuthHash();  // 매직링크로 들어온 경우 URL 해시 정리
+
+    // 인증 상태 변화 구독: 로그인/토큰갱신은 SYNC 켜기, 로그아웃은 끄기.
+    // TOKEN_REFRESHED 는 같은 세션이므로 중복 pull 을 피한다(doPull=false).
+    supa.auth.onAuthStateChange((event,session)=>{
+      if(event==='SIGNED_OUT'){ onSession(null); return; }
+      const same=SYNC.session && session && SYNC.session.user.id===session.user.id;
+      const doPull = (event==='SIGNED_IN') || !same;  // 신규 로그인/기기변경일 때만 pull
+      onSession(session,doPull);
+      cleanAuthHash();
+    });
     // 탭 포커스 복귀 시 가벼운 pull(다른 기기 변경 반영).
     window.addEventListener('focus',()=>{if(SYNC.enabled)pull();});
   }catch(e){/* 초기화 실패해도 로컬 앱은 그대로 */}
