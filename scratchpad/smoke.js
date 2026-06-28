@@ -1027,4 +1027,109 @@ t('delEx: 세트 1개(갓 추가)면 확인 없이 바로 삭제',()=>{
   ctx.confirm=realConfirm;
 });
 
+/* ========== 신규(PR-1): 클라우드 동기화 — 순수 LWW + supa=null 가드 ========== */
+/* 헤드리스 환경엔 supa(module 블록)가 없다 → cloudReady()=false, SYNC.enabled=false.
+   즉 이 테스트들은 "비로그인·미설정 시 로컬 전용 100% 보존" 경로를 검증한다. */
+
+t('mergeStates: 원격이 더 최신이면 remote 채택',()=>{
+  const r=ev("mergeStates({a:1},{a:2},'2026-06-27T00:00:00Z','2026-06-28T00:00:00Z')");
+  assert.strictEqual(r.winner,'remote');
+  assert.strictEqual(r.data.a,2);
+});
+t('mergeStates: 로컬이 더 최신이면 local 유지',()=>{
+  const r=ev("mergeStates({a:1},{a:2},'2026-06-28T00:00:00Z','2026-06-27T00:00:00Z')");
+  assert.strictEqual(r.winner,'local');
+  assert.strictEqual(r.data.a,1);
+});
+t('mergeStates: 동률이면 로컬 유지(불필요 덮어쓰기 방지)',()=>{
+  const r=ev("mergeStates({a:1},{a:2},'2026-06-27T00:00:00Z','2026-06-27T00:00:00Z')");
+  assert.strictEqual(r.winner,'local');
+});
+t('mergeStates: 원격 없음이면 항상 로컬',()=>{
+  const r=ev("mergeStates({a:1},null,null,null)");
+  assert.strictEqual(r.winner,'local');
+  assert.strictEqual(r.data.a,1);
+});
+t('mergeStates: 로컬 타임스탬프 없어도 원격 있으면 원격 채택',()=>{
+  const r=ev("mergeStates({a:1},{a:9},null,'2026-06-27T00:00:00Z')");
+  assert.strictEqual(r.winner,'remote');
+  assert.strictEqual(r.data.a,9);
+});
+
+t('supa 미설정이면 cloudReady()=false, SYNC.enabled=false',()=>{
+  reset();
+  assert.strictEqual(ev("cloudReady()"),false);
+  assert.strictEqual(ev("SYNC.enabled"),false);
+});
+
+t('비로그인 save() 는 push 훅을 안 탄다(로컬 전용, 네트워크 0)',()=>{
+  reset();
+  ev("__pushed=0;SYNC.onLocalChange=function(){__pushed++;};");
+  ev("quickEx('스쿼트');");           // 내부 save() 호출됨
+  assert.strictEqual(ev("__pushed"),0,'SYNC.enabled=false 라 훅 미실행');
+});
+
+t('SYNC.enabled=true 일 때만 save() 가 onLocalChange 호출',()=>{
+  reset();
+  ev("__pushed=0;SYNC.onLocalChange=function(){__pushed++;};SYNC.enabled=true;");
+  ev("save();");
+  assert.strictEqual(ev("__pushed"),1,'활성 시 1회');
+  ev("SYNC.enabled=false;");          // 정리(다른 테스트 격리)
+});
+
+t('getPulledAt/setPulledAt 라운드트립 + 해제',()=>{
+  reset();
+  ev("setPulledAt('2026-06-28T00:00:00Z');");
+  assert.strictEqual(ev("getPulledAt()"),'2026-06-28T00:00:00Z');
+  assert.strictEqual(store['sync_pulledAt'],'2026-06-28T00:00:00Z');
+  ev("setPulledAt(null);");
+  assert.strictEqual(ev("getPulledAt()"),null);
+});
+
+t('applyRemoteState: 원격 데이터를 로컬에 적용 + DEFAULT 폴백 보강',()=>{
+  reset();
+  // 신규 키가 빠진 원격 상태라도 DEFAULT 로 보강되어야 함
+  ev("applyRemoteState({workouts:{'2026-06-28':[{name:'벤치프레스',sets:[{weight:'80',reps:'10'}]}]},meals:{},habits:{},body:[],settings:{}});");
+  assert.strictEqual(ev("workoutVolume(DB.workouts['2026-06-28'])"),800);
+  assert(ev("Array.isArray(DB.exDB)"),'exDB 폴백');
+  assert(ev("DB.sessions&&typeof DB.sessions==='object'"),'sessions 폴백');
+});
+
+t('applyRemoteState 중에는 재푸시 루프가 안 생긴다',()=>{
+  reset();
+  ev("__pushed=0;SYNC.enabled=true;SYNC.onLocalChange=function(){__pushed++;};");
+  ev("applyRemoteState({workouts:{},meals:{},habits:{},body:[],settings:{}});");
+  assert.strictEqual(ev("__pushed"),0,'적용 중 save()는 훅 미실행(루프 방지)');
+  assert.strictEqual(ev("SYNC.enabled"),true,'적용 후 enabled 원복');
+  ev("SYNC.enabled=false;");
+});
+
+t('cloudLogin: 잘못된 이메일이면 토스트, SYNC.login 미호출',()=>{
+  reset();
+  ev("__loginCalls=[];SYNC.login=function(e){__loginCalls.push(e);};");
+  elCache['cloudEmail']=makeEl();elCache['cloudEmail'].value='not-an-email';
+  clearSpies();
+  ev("cloudLogin();");
+  assert.strictEqual(ev("__loginCalls.length"),0,'유효성 실패 시 로그인 시도 안 함');
+  assert(toastList().length>=1,'안내 토스트');
+  delete elCache['cloudEmail'];
+});
+
+t('cloudLogin: 올바른 이메일이면 SYNC.login(email) 호출',()=>{
+  reset();
+  ev("__loginCalls=[];SYNC.login=function(e){__loginCalls.push(e);};");
+  elCache['cloudEmail']=makeEl();elCache['cloudEmail'].value=' you@example.com ';
+  ev("cloudLogin();");
+  assert.strictEqual(ev("__loginCalls[0]"),'you@example.com','trim 후 전달');
+  delete elCache['cloudEmail'];
+});
+
+t('viewMe(): supa 미설정이면 동기화 카드가 "꺼짐" 안내를 보여줌',()=>{
+  reset();
+  const v=ev("viewMe()");
+  assert(v.includes('클라우드 동기화'),'동기화 카드 표시');
+  assert(v.includes('이 폰에만 저장'),'미설정 안내 문구');
+  assert(!v.includes('링크 받기'),'미설정이면 로그인 입력 미표시');
+});
+
 console.log('\n'+pass+' passed'+(process.exitCode?' (with failures)':''));
