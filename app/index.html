@@ -153,17 +153,35 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 .sum .v small{font-size:12px;color:var(--muted);font-weight:600}
 
 /* 투데이 주간 날짜 스트립 */
-.weekstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-.wday{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;border:none;
-  background:none;border-radius:12px;color:var(--muted);font-weight:600}
-.wday .dow{font-size:12px;color:var(--faint)}
-.wday .num{width:32px;height:32px;display:grid;place-items:center;border-radius:50%;
-  font-size:15px;font-weight:700;color:var(--text)}
-.wday.today .num{background:var(--accent);color:var(--on-accent)}
-.wday.sel .num{box-shadow:inset 0 0 0 2px var(--accent)}
-.wday .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);visibility:hidden}
-.wday.logged .dot{visibility:visible}
-.wday.today.logged .dot{background:var(--accent-strong)}
+/* 투데이 월 달력 */
+.calbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.caltitle{font-size:16px;font-weight:800;color:var(--text-strong)}
+.calnav{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--surface);
+  color:var(--text);font-size:20px;line-height:1;font-weight:700;cursor:pointer}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.chead{text-align:center;font-size:11px;color:var(--faint);font-weight:700;padding-bottom:4px}
+.cday{position:relative;aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;border:none;background:none;border-radius:10px;cursor:pointer;padding:0}
+.cday.empty{cursor:default}
+.cday .cnum{font-size:14px;font-weight:700;color:var(--text);width:30px;height:30px;display:grid;place-items:center;border-radius:50%}
+.cday.has-w .cnum{background:var(--accent-soft);color:var(--accent-strong)}
+.cday.today .cnum{background:var(--accent);color:var(--on-accent)}
+.cday.sel .cnum{box-shadow:inset 0 0 0 2px var(--accent)}
+.cdots{display:flex;gap:3px;height:5px;align-items:center}
+.cd{width:5px;height:5px;border-radius:50%;display:inline-block}
+.cd.w{background:var(--accent)}
+.cd.m{background:var(--warn)}
+.callegend{display:flex;gap:16px;justify-content:center;margin-top:12px;font-size:11px;color:var(--muted)}
+.callegend span{display:inline-flex;align-items:center;gap:5px}
+/* 주간 목표 진행바 */
+.goalbar{height:12px;border-radius:999px;background:var(--surface3);overflow:hidden}
+.goalfill{height:100%;border-radius:999px;background:var(--accent);transition:width .3s}
+.goalfill.done{background:var(--good)}
+.goalsteps{display:inline-flex;gap:5px}
+.gstep{width:13px;height:13px;border-radius:50%;background:var(--surface3);border:1px solid var(--line);
+  display:inline-block;cursor:pointer}
+.gstep.tgt{background:var(--surface);border-color:var(--accent)}
+.gstep.on{background:var(--accent);border-color:var(--accent)}
 
 /* modal/toast */
 .toast{position:fixed;bottom:calc(96px + var(--safe-bot));left:50%;transform:translateX(-50%);
@@ -351,28 +369,67 @@ function dayLogged(k){
   return (DB.workouts[k]&&DB.workouts[k].length)|| (DB.meals[k]&&DB.meals[k].length)||
     (DB.habits[k]&&Object.keys(DB.habits[k]).length);
 }
-/* 투데이 주간 날짜 스트립 */
-function weekStrip(){
-  const base=new Date(cur+'T00:00');
-  const start=new Date(base);start.setDate(start.getDate()-base.getDay()); // 그 주 일요일
-  const today=ymd(new Date());
+/* 기록 판정(달력 마커용): 운동=강조 점, 식단=보조 점 */
+function dayHasWorkout(k){return !!(DB.workouts[k]&&DB.workouts[k].length);}
+function dayHasMeal(k){return !!(DB.meals[k]&&DB.meals[k].length);}
+/* 주간 목표(주 n회). 신규 설정이라 항상 기본값 폴백. */
+function weeklyGoal(){const g=DB.settings&&DB.settings.weeklyGoal;return (g&&g>0)?g:4;}
+function setWeeklyGoal(n){n=Math.max(1,Math.min(7,n|0));DB.settings.weeklyGoal=n;save();renderAll();}
+/* 이번 주(cur 기준 일~토) 운동한 날 수 */
+function weekWorkoutDays(){return weekKeys(0).filter(dayHasWorkout).length;}
+
+/* 투데이 월 달력 — 현재 보는 달은 calMonth(offset, 0=오늘 달) 기준 */
+let calMonth=0;
+function calShift(n){calMonth+=n;renderAll();}
+function viewCalendar(){
+  const now=new Date();
+  const anchor=new Date(now.getFullYear(),now.getMonth()+calMonth,1);
+  const y=anchor.getFullYear(),m=anchor.getMonth();
+  const today=ymd(now);
+  const first=new Date(y,m,1);const lead=first.getDay(); // 1일 앞 빈칸(일요일 시작)
+  const days=new Date(y,m+1,0).getDate();
   let cells='';
-  for(let i=0;i<7;i++){
-    const d=new Date(start);d.setDate(start.getDate()+i);const k=ymd(d);
-    const cls=['wday'];
+  for(let i=0;i<lead;i++)cells+=`<div class="cday empty"></div>`;
+  for(let day=1;day<=days;day++){
+    const k=ymd(new Date(y,m,day));
+    const cls=['cday'];
     if(k===today)cls.push('today');
     if(k===cur)cls.push('sel');
-    if(dayLogged(k))cls.push('logged');
-    cells+=`<button class="${cls.join(' ')}" onclick="goDate('${k}')">
-      <span class="dow">${DOW[d.getDay()]}</span><span class="num">${d.getDate()}</span><span class="dot"></span></button>`;
+    const w=dayHasWorkout(k),me=dayHasMeal(k);
+    if(w)cls.push('has-w');
+    const dots=`<span class="cdots">${w?'<i class="cd w"></i>':''}${me?'<i class="cd m"></i>':''}</span>`;
+    cells+=`<button class="${cls.join(' ')}" onclick="goDate('${k}')"><span class="cnum">${day}</span>${dots}</button>`;
   }
-  return `<div class="card"><div class="weekstrip">${cells}</div></div>`;
+  const head=DOW.map(d=>`<div class="chead">${d}</div>`).join('');
+  return `<div class="card">
+    <div class="calbar">
+      <button class="calnav" onclick="calShift(-1)" aria-label="이전 달">‹</button>
+      <div class="caltitle">${y}년 ${m+1}월</div>
+      <button class="calnav" onclick="calShift(1)" aria-label="다음 달">›</button>
+    </div>
+    <div class="calgrid">${head}${cells}</div>
+    <div class="callegend"><span><i class="cd w"></i> 운동</span><span><i class="cd m"></i> 식단</span></div>
+  </div>`;
+}
+/* 주간 목표 진행바 */
+function viewWeeklyGoal(){
+  const goal=weeklyGoal(),done=weekWorkoutDays();
+  const pct=Math.min(100,Math.round(done/goal*100));
+  const reached=done>=goal;
+  return `<div class="card">
+    <h2>🎯 주간 목표 <span class="tag">주 ${goal}회</span></h2>
+    <div class="goalbar"><div class="goalfill${reached?' done':''}" style="width:${pct}%"></div></div>
+    <div class="row" style="justify-content:space-between;margin-top:8px">
+      <span class="muted" style="font-size:13px">${reached?'이번 주 목표 달성! 🔥':`이번 주 <b style="color:var(--text)">${done}</b> / ${goal}회 운동`}</span>
+      <span class="goalsteps">${[1,2,3,4,5,6,7].map(n=>`<i class="gstep${n<=goal?(n<=done?' on':' tgt'):''}" onclick="setWeeklyGoal(${n})" title="주 ${n}회 목표"></i>`).join('')}</span>
+    </div>
+  </div>`;
 }
 function goDate(k){cur=k;renderAll();}
 
 function viewHome(){
   const w=DB.workouts[cur]||[];const vol=workoutVolume(w);
-  let html=weekStrip();
+  let html=viewWeeklyGoal()+viewCalendar();
   // 오늘 운동 요약 카드
   html+=`<div class="card"><h2>🏋️ 오늘 운동 ${vol?`<span class="tag">볼륨 ${vol.toLocaleString()}kg</span>`:''}</h2>`;
   if(!w.length){
