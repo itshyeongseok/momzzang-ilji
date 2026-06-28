@@ -322,9 +322,8 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 /* ============ 저장소 ============ */
 const KEY='momzzang_v1';
 const DEFAULT={
-  workouts:{}, meals:{}, habits:{}, body:[], sessions:{}, exDB:[], routines:[],
+  workouts:{}, meals:{}, habits:{}, body:[], sleep:[], sessions:{}, exDB:[], routines:[],
   habitDefs:[
-    {id:'sleep', name:'수면', type:'num', unit:'시간', step:0.5, icon:'😴'},
     {id:'water', name:'물', type:'num', unit:'컵', step:1, icon:'💧'},
     {id:'protein', name:'단백질 챙김', type:'check', icon:'🥩'},
     {id:'stretch', name:'스트레칭', type:'check', icon:'🧘'},
@@ -338,6 +337,31 @@ function load(){
   return structuredClone(DEFAULT);
 }
 function save(){localStorage.setItem(KEY,JSON.stringify(DB));if(typeof SYNC!=='undefined'&&SYNC.enabled)SYNC.onLocalChange();}
+
+/* ============ 수면 분리 마이그레이션(멱등) ============
+   옛 데이터: habits[date].sleep(숫자=수면시간) → DB.sleep[{date,hours}]로 1회 이관.
+   settings.sleepMigrated 플래그로 재실행 방지. 옛 백업 import 시에도 호출(플래그 없으면 다시 1회). */
+function migrateSleep(){
+  if(!DB.sleep)DB.sleep=[];
+  // habitDefs에 남은 sleep 항목 제거(옛 백업 import로 되살아나도 정리)
+  const di=DB.habitDefs.findIndex(d=>d.id==='sleep');
+  if(di>=0)DB.habitDefs.splice(di,1);
+  if(DB.settings&&DB.settings.sleepMigrated){save();return;}
+  Object.keys(DB.habits||{}).forEach(date=>{
+    const h=DB.habits[date];if(!h||!('sleep'in h))return;
+    const hours=+h.sleep;
+    if(hours){
+      let rec=DB.sleep.find(s=>s.date===date);
+      if(!rec){DB.sleep.push({date,hours,rem:null,deep:null,memo:null,photo:null});}
+      else if(rec.hours==null){rec.hours=hours;}
+    }
+    delete h.sleep;
+    if(!Object.keys(h).length)delete DB.habits[date];
+  });
+  if(!DB.settings)DB.settings={};
+  DB.settings.sleepMigrated=true;
+  save();
+}
 
 /* ============ 클라우드 동기화 (로컬 우선) ============
    원칙: supa(아래 module 블록)가 없거나 비로그인이면 SYNC.enabled=false →
@@ -1767,7 +1791,7 @@ function exportData(){
 }
 function importData(input){const f=input.files[0];if(!f)return;
   const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);
-    if(!d.habitDefs)throw 0;DB=Object.assign(structuredClone(DEFAULT),d);save();closeSheet();
+    if(!d.habitDefs)throw 0;DB=Object.assign(structuredClone(DEFAULT),d);migrateSleep();closeSheet();
     if(isSessionActive())startElapsed();else stopElapsed();renderAll();toast('백업을 불러왔어요');
   }catch(e){toast('올바른 백업 파일이 아니에요');}};r.readAsText(f);}
 function resetData(){if(!confirm('정말 모든 기록을 삭제할까요? 되돌릴 수 없어요.'))return;
@@ -1997,6 +2021,7 @@ document.getElementById('datePicker').addEventListener('change',e=>{cur=e.target
 document.getElementById('menuBtn').addEventListener('click',openMenu);
 document.getElementById('sheetBg').addEventListener('click',closeSheet);
 
+migrateSleep();  // 옛 습관 수면(habits[date].sleep) → DB.sleep 1회 이관(멱등)
 renderAll();
 if(isSessionActive())startElapsed();  // 앱 재시작 시 활성 세션의 경과시간 이어서 표시
 
