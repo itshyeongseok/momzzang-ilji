@@ -238,6 +238,20 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 .rest-x{background:rgba(255,255,255,.22);border:none;color:var(--on-accent);width:30px;height:30px;border-radius:8px;font-size:15px;font-weight:800}
 .rest-bar.done{animation:restflash .5s ease 3}
 @keyframes restflash{0%,100%{background:var(--accent)}50%{background:var(--good)}}
+
+/* 인터벌 타이머(유산소/HIIT) — 휴식 타이머와 별개의 고정 오버레이 */
+.iv-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + var(--safe-bot));
+  z-index:31;max-width:340px;width:calc(100% - 32px);background:var(--good);color:#fff;
+  border-radius:14px;padding:11px 16px;display:none;align-items:center;gap:10px;font-weight:800;
+  box-shadow:0 8px 24px -6px rgba(16,24,40,.28)}
+.iv-bar.show{display:flex}
+.iv-bar.rest{background:var(--accent)}
+.iv-bar.done{background:var(--gold)}
+.iv-time{font-size:22px;font-variant-numeric:tabular-nums;min-width:54px}
+.iv-info{flex:1;display:flex;flex-direction:column;line-height:1.2}
+.iv-phase{font-size:14px}
+.iv-round{font-size:11px;opacity:.85;font-weight:700}
+.iv-x{background:rgba(255,255,255,.22);border:none;color:#fff;width:30px;height:30px;border-radius:8px;font-size:15px;font-weight:800}
 </style>
 </head>
 <body>
@@ -280,6 +294,13 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
   <span class="rest-time" id="restTime">0:00</span>
   <span class="rest-label">휴식 중</span>
   <button class="rest-x" onclick="event.stopPropagation();stopRest()" aria-label="정지">✕</button>
+</div>
+
+<!-- 인터벌 타이머 바 (재렌더링과 무관한 #view 밖 고정 오버레이) -->
+<div class="iv-bar" id="ivBar" onclick="openIntervalPicker()">
+  <span class="iv-time" id="ivTime">0:00</span>
+  <span class="iv-info"><span class="iv-phase" id="ivPhaseLbl">운동</span><span class="iv-round" id="ivRoundLbl">1/8</span></span>
+  <button class="iv-x" onclick="event.stopPropagation();stopInterval()" aria-label="정지">✕</button>
 </div>
 
 <div class="sheet-bg" id="sheetBg"></div>
@@ -350,7 +371,7 @@ let tab='home';
 const TITLES={home:'BULCUP',workout:'운동',stats:'분석',me:'프로필'};
 function setTab(t){tab=t;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.getElementById('datebar').style.display = (t==='home'||t==='workout')?'flex':'none';
-  renderAll();showRestBar();}
+  renderAll();showRestBar();showIntervalBar();}
 
 function renderAll(){
   document.getElementById('dateText').innerHTML=fmtDate(cur);
@@ -434,9 +455,37 @@ function viewWeeklyGoal(){
 }
 function goDate(k){cur=k;renderAll();}
 
+/* 오늘 체중 빠른 기록(투데이). 기존 DB.body에 cur 날짜로 저장(같은날 갱신).
+   이미 기록돼 있으면 그 값을 보여주고 수정할 수 있게 한다. */
+function viewTodayWeight(){
+  const todayRec=DB.body.find(b=>b.date===cur);
+  const has=todayRec&&todayRec.weight!=null;
+  // 직전(현재 날짜 이전) 체중 — 변화량 안내용
+  const prevArr=[...DB.body].filter(b=>b.weight!=null&&b.date<cur).sort((a,b)=>a.date<b.date?-1:1);
+  const prev=prevArr[prevArr.length-1];
+  let delta='';
+  if(has&&prev){const d=Math.round((todayRec.weight-prev.weight)*10)/10;
+    if(d!==0)delta=`<span class="delta ${d<0?'down':'bad'}" style="font-size:13px">${d<0?'▼':'▲'} ${Math.abs(d)}kg</span>`;}
+  return `<div class="card"><h2>⚖️ 오늘 체중 ${has?`<span class="tag">기록됨</span>`:''}</h2>
+    <div class="row" style="gap:8px;align-items:flex-end">
+      <div style="flex:1"><input type="number" inputmode="decimal" id="todayW" placeholder="${has?todayRec.weight:'오늘 체중 (kg)'}" value="${has?todayRec.weight:''}"></div>
+      <button class="btn" style="width:auto;white-space:nowrap" onclick="saveTodayWeight()">${has?'수정':'저장'}</button>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:8px">${has?`오늘 <b style="color:var(--text)">${todayRec.weight}kg</b> ${delta} · 매일 체중만 가볍게 남겨요.`:'숫자만 입력하면 오늘 날짜로 기록돼요.'}</div>
+  </div>`;
+}
+function saveTodayWeight(){
+  const v=parseFloat(document.getElementById('todayW').value);
+  if(!v||v<=0){toast('체중을 입력해주세요');return;}
+  const ex=DB.body.find(b=>b.date===cur);
+  if(ex)ex.weight=v;
+  else DB.body.push({date:cur,weight:v,muscle:null,fat:null});
+  save();renderAll();toast('오늘 체중을 기록했어요 💪');
+}
+
 function viewHome(){
   const w=DB.workouts[cur]||[];const vol=workoutVolume(w);
-  let html=viewWeeklyGoal()+viewCalendar();
+  let html=viewWeeklyGoal()+viewTodayWeight()+viewCalendar();
   // 오늘 운동 요약 카드
   html+=`<div class="card"><h2>🏋️ 오늘 운동 ${vol?`<span class="tag">볼륨 ${vol.toLocaleString()}kg</span>`:''}</h2>`;
   if(!w.length){
@@ -730,6 +779,14 @@ function viewWorkout(){
     <div class="muted" style="font-size:12px;text-align:center;margin-top:8px">부위별로 골라 담거나 직접 추가할 수 있어요.</div>
     ${prev?`<div class="divider"></div><div class="muted" style="font-size:12px;margin-bottom:7px">📋 최근 운동 (${prev.date}) 불러오기</div>
       <button class="btn sec sm" onclick="copyWorkout('${prev.date}')">그대로 가져오기</button>`:''}
+  </div>`;
+  // 타이머 도구(휴식·인터벌)
+  html+=`<div class="card"><h2>⏱ 타이머</h2>
+    <div class="grid2">
+      <button class="btn sec sm" onclick="openRestPicker()">😮‍💨 휴식 타이머</button>
+      <button class="btn sec sm" onclick="openIntervalPicker()">🏃 인터벌 타이머</button>
+    </div>
+    <div class="muted" style="font-size:12px;text-align:center;margin-top:8px">인터벌은 유산소·HIIT용. 운동/휴식 시간을 번갈아 알려줘요.</div>
   </div>`;
   // 내 루틴
   html+=viewRoutines(list.length>0);
@@ -1282,14 +1339,26 @@ function closeSheet(){document.getElementById('sheet').classList.remove('show');
 /* ============ 운동 경과시간 표시 ============ */
 let elapsedTimer=null;
 function updateElapsed(){const t=document.getElementById('elapsedTime');if(t)t.textContent=fmtDur(elapsedSec());}
+/* 세 고정 오버레이(경과시간·휴식·인터벌)가 동시에 떠도 겹치지 않게
+   아래에서부터 64px씩 단을 쌓아 bottom 오프셋을 배정한다.
+   순서(아래→위): 경과시간 → 휴식 → 인터벌. 표시 중인 것만 단을 차지한다. */
+function layoutOverlays(){
+  const base=86, step=64;
+  let tier=0;
+  [['elapsedBar',isSessionActive()],
+   ['restBar',restRemain>0],
+   ['ivBar',ivActive()]].forEach(([id,on])=>{
+    const el=document.getElementById(id);if(!el)return;
+    if(on){el.style.bottom=`calc(${base+tier*step}px + var(--safe-bot))`;tier++;}
+    else el.style.bottom='';
+  });
+}
 function showElapsed(){
   const bar=document.getElementById('elapsedBar');if(!bar)return;
   const on=isSessionActive();
   bar.classList.toggle('show',on);
   if(on)updateElapsed();
-  // 휴식 바와 겹치지 않게: 세션 진행 중엔 휴식 바를 한 칸 위로
-  const rb=document.getElementById('restBar');
-  if(rb)rb.style.bottom=on?'calc(150px + var(--safe-bot))':'';
+  layoutOverlays();
 }
 function startElapsed(){clearInterval(elapsedTimer);updateElapsed();showElapsed();
   elapsedTimer=setInterval(updateElapsed,1000);}
@@ -1308,6 +1377,7 @@ function showRestBar(){
     if(sheetTime)sheetTime.textContent=fmtClock(restRemain);
     bar.classList.toggle('warn',restRunning&&restRemain<=10);}
   else{bar.classList.remove('show','warn');fab.classList.toggle('show',tab==='workout');}
+  layoutOverlays();
 }
 function startRest(sec){restRemain=sec;restRunning=true;clearInterval(restTimer);
   restTimer=setInterval(tickRest,1000);showRestBar();}
@@ -1361,6 +1431,106 @@ function startCustomRest(){const v=parseInt(document.getElementById('restCustom'
   if(v<5){toast('5초 이상 입력해주세요');return;}
   DB.settings.restDefault=v;save();startRest(v);closeSheet();}
 function setAutoRest(on){DB.settings.autoRest=on;save();}
+
+/* ============ 인터벌 타이머 (유산소/HIIT) ============
+   휴식 타이머와 완전히 별개의 상태/타이머. work→rest→work… 로 라운드를 진행한다.
+   설정(work/rest/rounds)은 DB.settings.interval에 저장하고 항상 기본값 폴백. */
+let ivPhase=null, ivRemain=0, ivRound=0, ivRounds=0, ivWork=0, ivRest=0, ivRunning=false, ivTimer=null;
+function intervalCfg(){const c=DB.settings.interval||{};
+  return {work:c.work>0?c.work:30, rest:c.rest>=0?c.rest:15, rounds:c.rounds>0?c.rounds:8};}
+function ivActive(){return ivPhase!==null;}
+function ivPhaseLabel(){return ivPhase==='work'?'운동':ivPhase==='rest'?'휴식':ivPhase==='done'?'완료!':'';}
+function showIntervalBar(){
+  const bar=document.getElementById('ivBar');if(!bar)return;
+  const sheetTime=document.getElementById('ivSheetTime');
+  if(ivActive()){
+    bar.classList.add('show');
+    bar.classList.toggle('rest',ivPhase==='rest');
+    bar.classList.toggle('done',ivPhase==='done');
+    const time=ivPhase==='done'?'완료!':fmtClock(ivRemain);
+    document.getElementById('ivTime').textContent=time;
+    document.getElementById('ivPhaseLbl').textContent=ivPhaseLabel();
+    document.getElementById('ivRoundLbl').textContent=ivPhase==='done'?`${ivRounds}라운드 끝`:`${ivRound}/${ivRounds} 라운드`;
+    if(sheetTime){sheetTime.textContent=time;
+      const sp=document.getElementById('ivSheetPhase');if(sp)sp.textContent=ivPhaseLabel()+(ivPhase==='done'?'':` · ${ivRound}/${ivRounds} 라운드`);}
+  }else{
+    bar.classList.remove('show','rest','done');
+    if(sheetTime){sheetTime.textContent='';}
+  }
+  layoutOverlays();
+}
+function startInterval(){
+  const c=intervalCfg();
+  ivWork=c.work;ivRest=c.rest;ivRounds=c.rounds;
+  ivRound=1;ivPhase='work';ivRemain=ivWork;ivRunning=true;
+  clearInterval(ivTimer);ivTimer=setInterval(tickInterval,1000);
+  beep();if(navigator.vibrate)navigator.vibrate(120);
+  showIntervalBar();
+}
+function tickInterval(){
+  if(!ivRunning||ivPhase==='done')return;
+  ivRemain--;
+  if(ivRemain<=0){ivAdvance();return;}
+  showIntervalBar();
+}
+/* 현재 단계가 끝났을 때의 전환 처리 */
+function ivAdvance(){
+  beep();if(navigator.vibrate)navigator.vibrate([200,100,200]);
+  if(ivPhase==='work'){
+    if(ivRest>0){ivPhase='rest';ivRemain=ivRest;showIntervalBar();return;}
+    // 휴식 0초: 바로 다음 라운드
+    nextIvRound();return;
+  }
+  // 휴식 끝 → 다음 라운드
+  nextIvRound();
+}
+function nextIvRound(){
+  if(ivRound>=ivRounds){ivFinish();return;}
+  ivRound++;ivPhase='work';ivRemain=ivWork;showIntervalBar();
+}
+function ivFinish(){
+  clearInterval(ivTimer);ivRunning=false;ivPhase='done';
+  showIntervalBar();
+  setTimeout(()=>{if(ivPhase==='done')stopInterval();},3000);
+}
+function stopInterval(){clearInterval(ivTimer);ivRunning=false;ivPhase=null;ivRemain=0;
+  showIntervalBar();closeSheet();}
+function toggleInterval(){if(!ivActive()||ivPhase==='done')return;ivRunning=!ivRunning;
+  clearInterval(ivTimer);if(ivRunning)ivTimer=setInterval(tickInterval,1000);
+  showIntervalBar();openIntervalPicker();}
+function setIntervalCfg(work,rest,rounds){
+  DB.settings.interval={work:Math.max(1,work|0),rest:Math.max(0,rest|0),rounds:Math.max(1,rounds|0)};save();}
+function openIntervalPicker(){
+  let html=`<h3>🏃 인터벌 타이머</h3>`;
+  if(ivActive()){
+    html+=`<div id="ivSheetPhase" class="muted" style="text-align:center;font-size:14px;font-weight:700;margin-bottom:2px">${ivPhaseLabel()}${ivPhase==='done'?'':` · ${ivRound}/${ivRounds} 라운드`}</div>
+      <div id="ivSheetTime" style="text-align:center;font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;margin:2px 0 6px">${ivPhase==='done'?'완료!':fmtClock(ivRemain)}</div>`;
+    if(ivPhase!=='done'){
+      html+=`<button class="btn sec" onclick="toggleInterval()">${ivRunning?'⏸ 일시정지':'▶ 계속'}</button>`;
+    }
+    html+=`<button class="btn danger mt8" onclick="stopInterval()">■ 정지</button>`;
+  }else{
+    const c=intervalCfg();
+    html+=`<div class="muted" style="font-size:13px;margin-bottom:12px">운동·휴식 시간과 라운드 수를 정하면 자동으로 번갈아 알려줘요. 전환 때 소리·진동으로 신호를 줘요.</div>
+      <div class="grid3">
+        <div><label class="fld">운동(초)</label><input type="number" inputmode="numeric" id="ivWork" value="${c.work}"></div>
+        <div><label class="fld">휴식(초)</label><input type="number" inputmode="numeric" id="ivRest" value="${c.rest}"></div>
+        <div><label class="fld">라운드</label><input type="number" inputmode="numeric" id="ivRounds" value="${c.rounds}"></div>
+      </div>
+      <button class="btn mt12" onclick="startCustomInterval()">▶ 시작</button>`;
+  }
+  html+=`<button class="btn sec mt12" onclick="closeSheet()">닫기</button>`;
+  openSheet(html);
+}
+function startCustomInterval(){
+  const work=parseInt(document.getElementById('ivWork').value)||0;
+  const rest=parseInt(document.getElementById('ivRest').value)||0;
+  const rounds=parseInt(document.getElementById('ivRounds').value)||0;
+  if(work<1){toast('운동 시간을 1초 이상 입력해주세요');return;}
+  if(rounds<1){toast('라운드를 1 이상 입력해주세요');return;}
+  setIntervalCfg(work,rest,rounds);
+  startInterval();closeSheet();
+}
 
 /* ============ 이벤트 바인딩 ============ */
 document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
