@@ -74,6 +74,7 @@ nav button.active{color:var(--accent)}
 .muted{color:var(--muted)}
 .empty{text-align:center;color:var(--muted);padding:26px 10px;font-size:14px}
 .empty-ico{font-size:34px;line-height:1;margin-bottom:10px;opacity:.85}
+.thumb{width:46px;height:46px;border-radius:9px;object-fit:cover;background:var(--surface3);border:1px solid var(--line);cursor:pointer;flex-shrink:0}
 .row{display:flex;gap:8px;align-items:center}
 .spread{display:flex;justify-content:space-between;align-items:center}
 label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;font-weight:600}
@@ -370,6 +371,115 @@ function localSnapshot(){return structuredClone(DB);}
 function getPulledAt(){return localStorage.getItem(PULLED_KEY);}
 function setPulledAt(v){if(v==null)localStorage.removeItem(PULLED_KEY);else localStorage.setItem(PULLED_KEY,String(v));}
 
+/* ============ 사진(미디어) — 로컬 우선(IndexedDB) + 선택적 Storage ============
+   원칙(플랜 4절): 사진 원본은 IndexedDB(bulcup_media)에 항상 저장 → 오프라인·비로그인에서도 동작.
+   로그인(cloudReady) 일 때만 module 블록이 Storage 업로드 + media 메타 INSERT 수행.
+   표시는 IndexedDB 캐시 우선, 없으면 signed URL fetch 후 캐시(무료 egress 방어).
+   localStorage 엔 사진을 절대 안 넣는다(5MB 한계) — DB엔 메타(키·치수·경로)만. */
+const MEDIA_DB='bulcup_media', MEDIA_STORE='blobs';
+let _mediaDbP=null;
+function mediaDB(){
+  if(_mediaDbP)return _mediaDbP;
+  _mediaDbP=new Promise((res,rej)=>{
+    if(typeof indexedDB==='undefined'){rej(new Error('no idb'));return;}
+    const req=indexedDB.open(MEDIA_DB,1);
+    req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(MEDIA_STORE))db.createObjectStore(MEDIA_STORE);};
+    req.onsuccess=()=>res(req.result);
+    req.onerror=()=>rej(req.error);
+  });
+  return _mediaDbP;
+}
+function idbPut(key,blob){return mediaDB().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(MEDIA_STORE,'readwrite');tx.objectStore(MEDIA_STORE).put(blob,key);
+  tx.oncomplete=()=>res(key);tx.onerror=()=>rej(tx.error);}));}
+function idbGet(key){return mediaDB().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(MEDIA_STORE,'readonly');const r=tx.objectStore(MEDIA_STORE).get(key);
+  r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error);}));}
+function idbDel(key){return mediaDB().then(db=>new Promise((res)=>{
+  const tx=db.transaction(MEDIA_STORE,'readwrite');tx.objectStore(MEDIA_STORE).delete(key);
+  tx.oncomplete=()=>res();tx.onerror=()=>res();}));}
+
+/* 캔버스 압축(의존성0): 긴 변을 max 픽셀로 축소 후 JPEG 인코딩.
+   반환: {blob, width, height, bytes}. 입력보다 작아지는 게 목표(egress·용량 절감). */
+const PHOTO_MAX=1000, PHOTO_QUALITY=0.78;
+function fitDims(w,h,max){
+  if(w<=max&&h<=max)return {w,h};
+  const s=w>=h? max/w : max/h;
+  return {w:Math.round(w*s), h:Math.round(h*s)};
+}
+function compressImage(file,max,quality){
+  max=max||PHOTO_MAX;quality=quality==null?PHOTO_QUALITY:quality;
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const d=fitDims(img.naturalWidth||img.width, img.naturalHeight||img.height, max);
+        const cv=document.createElement('canvas');cv.width=d.w;cv.height=d.h;
+        cv.getContext('2d').drawImage(img,0,0,d.w,d.h);
+        cv.toBlob(b=>{URL.revokeObjectURL(url);
+          if(!b){rej(new Error('encode failed'));return;}
+          res({blob:b,width:d.w,height:d.h,bytes:b.size});
+        },'image/jpeg',quality);
+      }catch(e){URL.revokeObjectURL(url);rej(e);}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('load failed'));};
+    img.src=url;
+  });
+}
+
+/* 순수: 새 사진의 로컬 키와 Storage 경로(uid 채워질 자리). */
+function uid4(){return (typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID()
+  :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);});}
+/* media 메타 구조 생성. kind:'meal'|'body', date:'YYYY-MM-DD'.
+   localKey 는 IndexedDB 키이자(로그인 시) Storage 경로의 파일명 베이스.
+   path 는 '<uid>/<kind>/<date>/<key>.jpg' (최상위 폴더 uid → 폴더단위 RLS). */
+function buildPhotoMeta(kind,date,dims){
+  const key=uid4();
+  return {id:key, kind, date, w:dims&&dims.width||null, h:dims&&dims.height||null,
+    bytes:dims&&dims.bytes||null};
+}
+function storagePath(uid,kind,date,key){return uid+'/'+kind+'/'+date+'/'+key+'.jpg';}
+
+/* 사진 한 장 저장 흐름: 항상 IndexedDB에 먼저 넣고, 로그인 시에만 Storage 업로드.
+   반환: 식단/신체 레코드에 붙일 메타(photo 필드). 업로드 실패해도 로컬 메타는 유효. */
+async function savePhoto(kind,date,file){
+  const c=await compressImage(file);
+  const meta=buildPhotoMeta(kind,date,c);
+  await idbPut(meta.id,c.blob);                 // 로컬 우선: 오프라인·비로그인에서도 보존
+  // 로그인 시에만 업로드(네트워크). 비로그인이면 no-op → 네트워크 0.
+  if(cloudReady()&&SYNC.enabled&&SYNC.uploadPhoto){
+    try{const path=await SYNC.uploadPhoto(kind,date,meta.id,c);if(path)meta.path=path;}catch(e){}
+  }
+  return meta;
+}
+/* 표시용 objectURL: IndexedDB 캐시 우선, 없고 로그인+경로 있으면 signed URL fetch 후 캐시. */
+async function photoURL(meta){
+  if(!meta)return null;
+  try{
+    let blob=await idbGet(meta.id);
+    if(!blob && meta.path && cloudReady() && SYNC.signedUrl){
+      const u=await SYNC.signedUrl(meta.path);
+      if(u){const r=await fetch(u);blob=await r.blob();idbPut(meta.id,blob).catch(()=>{});}
+    }
+    return blob?URL.createObjectURL(blob):null;
+  }catch(e){return null;}
+}
+/* 화면의 <img data-photo="id"> 들을 비동기로 채운다(렌더 후 호출). */
+function hydratePhotos(){
+  document.querySelectorAll('img[data-photo]').forEach(img=>{
+    if(img.dataset.loaded)return;img.dataset.loaded='1';
+    const meta={id:img.dataset.photo, path:img.dataset.path||null};
+    photoURL(meta).then(u=>{if(u)img.src=u;else img.closest('[data-photo-wrap]')&&(img.closest('[data-photo-wrap]').style.display='none');});
+  });
+}
+/* 전체화면 사진 뷰어(시트 재사용). */
+function viewPhoto(id,path){
+  openSheet(`<div style="text-align:center"><img data-photo="${esc(id)}" ${path?`data-path="${esc(path)}"`:''} data-photo-wrap style="max-width:100%;max-height:70vh;border-radius:12px" alt="사진">
+    <div style="margin-top:12px"><button class="btn sec" onclick="closeSheet()">닫기</button></div></div>`);
+  hydratePhotos();
+}
+
 /* ============ 운동 마스터(부위별) ============ */
 const PARTS=['가슴','등','어깨','팔','하체','복근','유산소'];
 /* 시드: 부위별 대표 운동. 사용자 추가분(DB.exDB)과 병합해서 사용. */
@@ -426,6 +536,7 @@ function renderAll(){
   else if(tab==='stats')v.innerHTML=viewStats();
   else if(tab==='me')v.innerHTML=viewMe();
   if(tab==='home'||tab==='stats')drawChart();
+  hydratePhotos();
   showElapsed();
 }
 
@@ -1196,10 +1307,11 @@ function viewMeal(){
     if(!items.length)return;
     html+=`<div style="margin-bottom:10px"><div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">${mealIcon(t)} ${t}</div>`;
     items.forEach(({x,idx})=>{
+      const ph=x.photo?`<img class="thumb" data-photo="${esc(x.photo.id)}" ${x.photo.path?`data-path="${esc(x.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(x.photo.id)}','${esc(x.photo.path||'')}')" alt="식단 사진">`:'';
       html+=`<div class="ex" style="margin-bottom:7px"><div class="spread"><div style="flex:1">
         <div style="font-weight:600">${esc(x.memo||'(메모 없음)')}</div>
         <div class="muted" style="font-size:12px;margin-top:2px">${x.kcal?x.kcal+'kcal':''}${x.protein?' · 단백 '+x.protein+'g':''}</div>
-        </div><button class="x" onclick="delMeal(${idx})">✕</button></div></div>`;
+        </div>${ph}<button class="x" onclick="delMeal(${idx})">✕</button></div></div>`;
     });
     html+=`</div>`;
   });
@@ -1213,20 +1325,32 @@ function viewMeal(){
       <div><label class="fld">칼로리 (선택)</label><input type="number" inputmode="numeric" id="mealKcal" placeholder="kcal"></div>
       <div><label class="fld">단백질 (선택)</label><input type="number" inputmode="numeric" id="mealProt" placeholder="g"></div>
     </div>
+    <input type="file" id="mealPhoto" accept="image/*" capture="environment" style="display:none" onchange="pickMealPhoto(this)">
+    <div class="row mt8" style="align-items:center;gap:8px">
+      <button class="btn sec sm" onclick="document.getElementById('mealPhoto').click()">📷 사진 첨부</button>
+      <span id="mealPhotoName" class="muted" style="font-size:12px">${mealPhotoPend?'사진 1장 선택됨':''}</span>
+    </div>
     <button class="btn mt8" onclick="addMeal()">+ 추가</button>
   </div>`;
   return html;
 }
 function mealIcon(t){return {아침:'🌅',점심:'☀️',저녁:'🌙',간식:'🍪'}[t]||'🍽';}
 let curMT='아침';
+let mealPhotoPend=null;   // 추가 전 임시 보관한 선택 파일(저장 시 압축·첨부)
 function pickMT(el){curMT=el.dataset.mt;document.querySelectorAll('[data-mt]').forEach(c=>c.classList.toggle('on',c===el));}
-function addMeal(){const memo=document.getElementById('mealMemo').value.trim();
+function pickMealPhoto(input){const f=input.files&&input.files[0];mealPhotoPend=f||null;
+  const lbl=document.getElementById('mealPhotoName');if(lbl)lbl.textContent=f?'사진 1장 선택됨':'';}
+async function addMeal(){const memo=document.getElementById('mealMemo').value.trim();
   const kcal=document.getElementById('mealKcal').value;const protein=document.getElementById('mealProt').value;
-  if(!memo&&!kcal){toast('메모나 칼로리를 입력해주세요');return;}
+  if(!memo&&!kcal&&!mealPhotoPend){toast('메모·칼로리·사진 중 하나를 입력해주세요');return;}
+  let photo=null;
+  if(mealPhotoPend){try{photo=await savePhoto('meal',cur,mealPhotoPend);}catch(e){toast('사진 처리 실패');}}
+  mealPhotoPend=null;
   if(!DB.meals[cur])DB.meals[cur]=[];
-  DB.meals[cur].push({type:curMT,memo,kcal,protein});save();renderAll();toast(praise());
+  DB.meals[cur].push({type:curMT,memo,kcal,protein,photo});save();renderAll();toast(praise());
 }
-function delMeal(i){DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
+function delMeal(i){const m=DB.meals[cur][i];if(m&&m.photo)idbDel(m.photo.id).catch(()=>{});
+  DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
 
 /* ============ 생활습관 ============ */
 function viewHabit(){
@@ -1300,16 +1424,22 @@ function viewBody(){
       <div><label class="fld">골격근(kg)</label><input type="number" inputmode="decimal" id="bMuscle" placeholder="0"></div>
       <div><label class="fld">체지방(%)</label><input type="number" inputmode="decimal" id="bFat" placeholder="0"></div>
     </div>
+    <input type="file" id="bodyPhoto" accept="image/*" capture="environment" style="display:none" onchange="pickBodyPhoto(this)">
+    <div class="row mt8" style="align-items:center;gap:8px">
+      <button class="btn sec sm" onclick="document.getElementById('bodyPhoto').click()">📷 인바디 사진</button>
+      <span id="bodyPhotoName" class="muted" style="font-size:12px">${bodyPhotoPend?'사진 1장 선택됨':''}</span>
+    </div>
     <button class="btn mt8" onclick="addBody()">+ 저장</button>
   </div>`;
   if(arr.length){
     html+=`<div class="card"><h2>기록 목록</h2>`;
     [...arr].reverse().forEach((r,ri)=>{
       const realIdx=DB.body.indexOf(r);
+      const ph=r.photo?`<img class="thumb" data-photo="${esc(r.photo.id)}" ${r.photo.path?`data-path="${esc(r.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(r.photo.id)}','${esc(r.photo.path||'')}')" alt="인바디 사진">`:'';
       html+=`<div class="spread" style="padding:9px 0;border-bottom:1px solid var(--line)">
         <div><b>${r.date}</b> <span class="muted" style="font-size:13px">
         ${r.weight?r.weight+'kg':''}${r.muscle?' · 근'+r.muscle:''}${r.fat?' · 지'+r.fat+'%':''}</span></div>
-        <button class="x" onclick="delBody(${realIdx})">✕</button></div>`;
+        ${ph}<button class="x" onclick="delBody(${realIdx})">✕</button></div>`;
     });
     html+=`</div>`;
   }
@@ -1323,18 +1453,25 @@ function metricBox(label,v,pv,unit,lowerBetter){
   return `<div class="metric"><div class="v">${v??'—'}<small>${v!=null?unit:''}</small></div>
     <div class="l">${label}</div>${d}</div>`;
 }
-function addBody(){
+let bodyPhotoPend=null;
+function pickBodyPhoto(input){const f=input.files&&input.files[0];bodyPhotoPend=f||null;
+  const lbl=document.getElementById('bodyPhotoName');if(lbl)lbl.textContent=f?'사진 1장 선택됨':'';}
+async function addBody(){
   const date=document.getElementById('bDate').value;
   const weight=parseFloat(document.getElementById('bWeight').value)||null;
   const muscle=parseFloat(document.getElementById('bMuscle').value)||null;
   const fat=parseFloat(document.getElementById('bFat').value)||null;
-  if(!date||(!weight&&!muscle&&!fat)){toast('값을 하나 이상 입력해주세요');return;}
+  if(!date||(!weight&&!muscle&&!fat&&!bodyPhotoPend)){toast('값이나 사진을 하나 이상 입력해주세요');return;}
+  let photo=null;
+  if(bodyPhotoPend){try{photo=await savePhoto('body',date,bodyPhotoPend);}catch(e){toast('사진 처리 실패');}}
+  bodyPhotoPend=null;
   const ex=DB.body.find(b=>b.date===date);
-  if(ex){if(weight)ex.weight=weight;if(muscle)ex.muscle=muscle;if(fat)ex.fat=fat;}
-  else DB.body.push({date,weight,muscle,fat});
+  if(ex){if(weight)ex.weight=weight;if(muscle)ex.muscle=muscle;if(fat)ex.fat=fat;if(photo)ex.photo=photo;}
+  else DB.body.push({date,weight,muscle,fat,photo});
   save();renderAll();toast(praise());
 }
-function delBody(i){DB.body.splice(i,1);save();renderAll();}
+function delBody(i){const b=DB.body[i];if(b&&b.photo)idbDel(b.photo.id).catch(()=>{});
+  DB.body.splice(i,1);save();renderAll();}
 function drawChart(){
   const svg=document.getElementById('chart');if(!svg)return;
   const arr=[...DB.body].filter(b=>b.weight!=null).sort((a,b)=>a.date<b.date?-1:1);
@@ -1734,6 +1871,26 @@ SYNC.logout=async ()=>{
   try{await supa.auth.signOut();}catch(e){}
   await onSession(null);
   window.toast&&window.toast('로그아웃했어요');
+};
+
+/* 사진 업로드(로그인 시에만 클래식 savePhoto 가 호출). 비공개 버킷 photos.
+   경로 '<uid>/<kind>/<date>/<key>.jpg'(폴더단위 RLS). 성공 시 media 메타 INSERT 후 path 반환.
+   실패는 throw → 호출부가 흡수(로컬 IndexedDB 사본은 이미 저장됨). */
+SYNC.uploadPhoto=async (kind,date,key,c)=>{
+  if(!supa||!SYNC.session)return null;
+  const uid=SYNC.session.user.id;
+  const path=uid+'/'+kind+'/'+date+'/'+key+'.jpg';
+  const {error}=await supa.storage.from('photos').upload(path,c.blob,{upsert:true,contentType:'image/jpeg'});
+  if(error)throw error;
+  await supa.from('media').insert({user_id:uid,kind,ref_date:date,storage_path:path,
+    width:c.width,height:c.height,bytes:c.bytes});
+  return path;
+};
+/* 비공개 버킷이라 표시는 짧은 만료 signed URL(클래식 photoURL 이 캐시 미스 시 호출). */
+SYNC.signedUrl=async (path)=>{
+  if(!supa||!SYNC.session||!path)return null;
+  const {data,error}=await supa.storage.from('photos').createSignedUrl(path,3600);
+  return error?null:(data&&data.signedUrl);
 };
 
 // 초기화: 매직링크 복귀 세션 포함 현재 세션 확인 + 변경 구독.

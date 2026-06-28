@@ -75,3 +75,109 @@ create policy "own rows - app_state"
 4. (선택) 비행기모드로 기록 후 복구 → 다음 저장/포커스에서 자동 재동기화 확인.
 
 > service_role/secret 키는 **앱·공개 저장소에 절대 넣지 않습니다.** (AI 코치 루틴용으로 PR-3에서 로컬 PC `.env`에만 보관.)
+
+---
+---
+
+# Supabase 수동 설정 (형석님 직접 — PR-2 사진용)
+
+> PR-2는 **식단·인바디 사진**을 추가합니다. 아래 (d)~(e)는 **로그인 시 클라우드 백업**을 켜기 위한 일회성 설정입니다.
+> **이 설정을 안 해도 사진 기능은 100% 동작합니다** — 비로그인/오프라인이면 사진은 폰의 **IndexedDB(`bulcup_media`)** 에만 저장되고 네트워크는 0입니다. 아래 설정은 로그인했을 때 사진을 Supabase Storage(비공개 버킷)에 백업하고 다른 기기에서도 보이게 하는 용도입니다.
+>
+> 프로젝트: `https://gjiyfgkswbzjfkibvwva.supabase.co`
+
+---
+
+## (d) SQL — `media` 테이블 + RLS 정책
+
+대시보드 → **SQL Editor** → **New query** → 아래 전문을 붙여넣고 **Run**.
+
+(플랜 `docs/supabase-plan.md` 3절·1.4절 기반. 사진 **메타**(경로·치수·바이트)만 이 테이블에 저장하고, 실제 이미지 바이너리는 (e)의 Storage 버킷에 저장합니다.)
+
+```sql
+-- 1) 사진 메타. 바이너리는 Storage(photos 버킷). 식단/인바디 사진 공통.
+create table if not exists public.media (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  kind         text not null check (kind in ('meal','body')),  -- 어떤 탭의 사진인지
+  ref_date     date not null,                                   -- 식단/신체 기록 날짜 'YYYY-MM-DD'
+  storage_path text not null,         -- 예: '<user_id>/meal/2026-06-27/<uuid>.jpg'
+  width  int, height int, bytes int,
+  created_at   timestamptz not null default now()
+);
+create index if not exists media_user_date_idx on public.media(user_id, ref_date);
+
+-- 2) RLS 켜기
+alter table public.media enable row level security;
+
+-- 3) "내 행만" 정책(앱 INSERT/SELECT). auth.uid()를 (select ...)로 감싸 성능 최적화.
+drop policy if exists "own rows - media" on public.media;
+create policy "own rows - media"
+  on public.media for all
+  to authenticated
+  using      ( user_id = (select auth.uid()) )
+  with check ( user_id = (select auth.uid()) );
+```
+
+---
+
+## (e) Storage — 비공개 버킷 `photos` 생성 + 폴더단위 RLS
+
+### (e-1) 버킷 만들기 (대시보드 클릭)
+
+1. 대시보드 → 좌측 **Storage** → **New bucket**.
+2. **Name**: `photos` (정확히 소문자, 앱 코드와 일치).
+3. **Public bucket**: **OFF (비공개)** — 켜지 마세요. 비공개여야 모든 접근이 RLS로 통제되고, 표시는 짧은 만료의 **signed URL**로만 됩니다(무료 egress 방어).
+4. (선택) File size limit / Allowed MIME types: 비워두거나 `image/jpeg`만 허용해도 됩니다. 앱은 압축 후 JPEG(장당 ~100~200KB)만 올립니다.
+5. **Create bucket**.
+
+### (e-2) Storage RLS 정책 SQL
+
+대시보드 → **SQL Editor** → **New query** → 아래 전문 붙여넣고 **Run**.
+경로 규칙은 **`<user_id>/<kind>/<YYYY-MM-DD>/<uuid>.jpg`** — 최상위 폴더가 `user_id`라서 폴더 첫 세그먼트로 본인 파일만 통제합니다.
+
+```sql
+-- 'photos' 버킷에서 "내 폴더(=user_id로 시작하는 경로)"만 읽기/쓰기/수정/삭제.
+-- storage.foldername(name)[1] = 경로 첫 세그먼트(=user_id 여야 함).
+
+drop policy if exists "photos: read own"   on storage.objects;
+drop policy if exists "photos: write own"  on storage.objects;
+drop policy if exists "photos: update own" on storage.objects;
+drop policy if exists "photos: delete own" on storage.objects;
+
+create policy "photos: read own"
+  on storage.objects for select to authenticated
+  using ( bucket_id = 'photos'
+          and (storage.foldername(name))[1] = (select auth.uid())::text );
+
+create policy "photos: write own"
+  on storage.objects for insert to authenticated
+  with check ( bucket_id = 'photos'
+          and (storage.foldername(name))[1] = (select auth.uid())::text );
+
+create policy "photos: update own"
+  on storage.objects for update to authenticated
+  using ( bucket_id = 'photos'
+          and (storage.foldername(name))[1] = (select auth.uid())::text );
+
+create policy "photos: delete own"
+  on storage.objects for delete to authenticated
+  using ( bucket_id = 'photos'
+          and (storage.foldername(name))[1] = (select auth.uid())::text );
+```
+
+> 검증: 대시보드는 RLS를 우회하므로 진짜 검증은 **앱에서 로그인한 채** 사진을 올리고 다시 보는 것으로 합니다(아래 폰 검증).
+
+---
+
+## 폰 실기기 검증 — 사진 (헤드리스로는 불가)
+
+압축·IndexedDB·Storage 업로드·signed URL 표시는 헤드리스 스모크로 검증할 수 없어, **폰에서 수동 확인**합니다:
+
+1. **비로그인/오프라인(로컬 우선) 먼저:** 로그아웃(또는 비행기모드) 상태에서 홈 **식단 추가 → 📷 사진 첨부**로 한 장 → 추가. 목록에 **썸네일**이 뜨고, 탭하면 크게 보이는지 확인. (이때 네트워크 요청 0 — 개발자도구 Network 탭으로 확인 가능.)
+2. **신체 → 측정 기록 → 📷 인바디 사진** 첨부 → 저장. 기록 목록에 썸네일 표시 확인(주 1회 인바디 용도).
+3. **로그인 후 백업:** (d)~(e) 완료 + 로그인 상태에서 사진 첨부 → 추가. 잠시 뒤 대시보드 **Storage → photos** 에 `<uid>/meal|body/<날짜>/<uuid>.jpg`가, **Table editor → media** 에 메타 행이 생기는지 확인.
+4. **egress(재다운로드) 0 확인:** 같은 사진을 다시 볼 때(앱 재진입/탭 전환) Network 탭에서 Storage 다운로드가 **다시 일어나지 않는지** 확인 — IndexedDB 캐시 히트로 즉시 표시돼야 합니다.
+5. **다른 기기:** 다른 기기/시크릿 창에서 같은 이메일 로그인 → 사진이 signed URL로 받아져 보이고, 이후엔 그 기기의 IndexedDB에 캐시되는지 확인.
+
+> 사진은 **localStorage에 절대 저장하지 않습니다**(5MB 한계). 로컬 사본은 IndexedDB(`bulcup_media`), 원본 진실원은 Storage(`photos`)입니다.
