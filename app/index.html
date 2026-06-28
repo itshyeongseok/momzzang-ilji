@@ -1339,14 +1339,26 @@ function closeSheet(){document.getElementById('sheet').classList.remove('show');
 /* ============ 운동 경과시간 표시 ============ */
 let elapsedTimer=null;
 function updateElapsed(){const t=document.getElementById('elapsedTime');if(t)t.textContent=fmtDur(elapsedSec());}
+/* 세 고정 오버레이(경과시간·휴식·인터벌)가 동시에 떠도 겹치지 않게
+   아래에서부터 64px씩 단을 쌓아 bottom 오프셋을 배정한다.
+   순서(아래→위): 경과시간 → 휴식 → 인터벌. 표시 중인 것만 단을 차지한다. */
+function layoutOverlays(){
+  const base=86, step=64;
+  let tier=0;
+  [['elapsedBar',isSessionActive()],
+   ['restBar',restRemain>0],
+   ['ivBar',ivActive()]].forEach(([id,on])=>{
+    const el=document.getElementById(id);if(!el)return;
+    if(on){el.style.bottom=`calc(${base+tier*step}px + var(--safe-bot))`;tier++;}
+    else el.style.bottom='';
+  });
+}
 function showElapsed(){
   const bar=document.getElementById('elapsedBar');if(!bar)return;
   const on=isSessionActive();
   bar.classList.toggle('show',on);
   if(on)updateElapsed();
-  // 휴식 바와 겹치지 않게: 세션 진행 중엔 휴식 바를 한 칸 위로
-  const rb=document.getElementById('restBar');
-  if(rb)rb.style.bottom=on?'calc(150px + var(--safe-bot))':'';
+  layoutOverlays();
 }
 function startElapsed(){clearInterval(elapsedTimer);updateElapsed();showElapsed();
   elapsedTimer=setInterval(updateElapsed,1000);}
@@ -1365,6 +1377,7 @@ function showRestBar(){
     if(sheetTime)sheetTime.textContent=fmtClock(restRemain);
     bar.classList.toggle('warn',restRunning&&restRemain<=10);}
   else{bar.classList.remove('show','warn');fab.classList.toggle('show',tab==='workout');}
+  layoutOverlays();
 }
 function startRest(sec){restRemain=sec;restRunning=true;clearInterval(restTimer);
   restTimer=setInterval(tickRest,1000);showRestBar();}
@@ -1432,9 +1445,6 @@ function showIntervalBar(){
   const sheetTime=document.getElementById('ivSheetTime');
   if(ivActive()){
     bar.classList.add('show');
-    // 다른 바(휴식/경과시간)와 겹치지 않게 한 칸 위로
-    const stacked=(restRemain>0)||isSessionActive();
-    bar.style.bottom=stacked?'calc(150px + var(--safe-bot))':'';
     bar.classList.toggle('rest',ivPhase==='rest');
     bar.classList.toggle('done',ivPhase==='done');
     const time=ivPhase==='done'?'완료!':fmtClock(ivRemain);
@@ -1447,6 +1457,7 @@ function showIntervalBar(){
     bar.classList.remove('show','rest','done');
     if(sheetTime){sheetTime.textContent='';}
   }
+  layoutOverlays();
 }
 function startInterval(){
   const c=intervalCfg();
