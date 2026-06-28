@@ -163,6 +163,12 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 .sum .k{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px}
 .sum .v{font-size:20px;font-weight:800;margin-top:5px;color:var(--text-strong)}
 .sum .v small{font-size:12px;color:var(--muted);font-weight:600}
+/* 운동 종료 인사이트 */
+.ins-celebrate{background:var(--accent-soft);color:var(--accent-strong);border-radius:14px;
+  padding:12px;text-align:center;font-weight:800;font-size:15px;margin-bottom:12px}
+.ins-card{margin:12px 0 0;padding:14px}
+.ins-up{color:var(--good)}
+.ins-down{color:var(--danger)}
 
 /* 투데이 주간 날짜 스트립 */
 /* 투데이 월 달력 */
@@ -941,22 +947,100 @@ function endSession(){
   save();stopElapsed();renderAll();
   showSessionSummary(s);
 }
-/* 운동 종료 요약 카드(시트) */
+/* 운동 종료 인사이트 화면(시트). 데이터로 산출 가능한 것 위주, 부족분은 우아하게 생략. */
 function showSessionSummary(s){
+  openSheet(viewInsight(s));
+}
+/* 인사이트 본문 HTML(테스트 용이하게 분리). */
+function viewInsight(s){
   const sum=sessionSummary(s);
-  let html=`<h3>오늘의 운동 💪</h3>
-    <div class="sum-grid">
-      <div class="sum"><div class="k">종목</div><div class="v">${sum.nEx}<small> 종목 · ${sum.nSets}세트</small></div></div>
+  const kcal=estimateCalories(sum.durationSec,sum.volume);
+  const nth=sessionCount();
+  const ps=sessionPartStats(s.id);
+  const cmp=sessionAvgCompare(s);
+  const timeline=sessionVolumeTimeline(s.id);
+
+  let html=`<h3>오늘의 운동 💪</h3>`;
+
+  // N번째 운동 기록 축하
+  html+=`<div class="ins-celebrate">${nth>0?nth+'번째 운동 기록 완료! 멋져요 🎉':'첫 운동 기록 완료! 멋져요 🎉'}</div>`;
+
+  // 1) 운동 요약 (시간·종목·볼륨·추정칼로리)
+  html+=`<div class="sum-grid">
       <div class="sum"><div class="k">⏱ 소요시간</div><div class="v">${fmtDur(sum.durationSec)}</div></div>
-    </div>
-    <div class="sum mt8"><div class="k">📦 총 볼륨</div>
-      <div class="v">${sum.volume.toLocaleString()}<small> kg (${(sum.volume/1000).toFixed(1)}t)</small></div></div>`;
+      <div class="sum"><div class="k">🏋️ 운동</div><div class="v">${sum.nEx}<small> 종목 · ${sum.nSets}세트</small></div></div>
+      <div class="sum"><div class="k">📦 총 볼륨</div><div class="v">${sum.volume.toLocaleString()}<small> kg</small></div></div>
+      <div class="sum"><div class="k">🔥 칼로리 <span class="tag">추정</span></div><div class="v">${kcal.toLocaleString()}<small> kcal</small></div></div>
+    </div>`;
+
+  // 신기록
   if(sum.prHits.length){
     html+=`<div class="sum mt8" style="border-color:var(--warn)"><div class="k" style="color:var(--warn)">🎉 신기록 ${sum.prHits.length}개</div>
       <div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--text-strong)">${sum.prHits.map(p=>esc(p.name)+' '+p.value+'kg').join(' · ')}</div></div>`;
   }
+
+  // 2) 평균 대비 비교(완료 세션 표본 있을 때만)
+  html+=`<div class="card ins-card"><h2 style="margin-top:0">📊 평균 대비</h2>`;
+  if(cmp){
+    const vTxt=cmp.volDelta>0?'+'+cmp.volDelta.toLocaleString()+'kg':(cmp.volDelta<0?cmp.volDelta.toLocaleString()+'kg':'± 0kg');
+    const dMin=Math.round(cmp.durDelta/60);
+    const dTxt=dMin>0?'+'+dMin+'분':(dMin<0?dMin+'분':'± 0분');
+    const vCls=cmp.volDelta>=0?'up':'down';const dCls=cmp.durDelta>=0?'up':'down';
+    html+=`<div class="sum-grid">
+        <div class="sum"><div class="k">볼륨</div><div class="v ins-${vCls}">${vTxt}</div><div class="muted" style="font-size:11px">평균 ${cmp.avgVol.toLocaleString()}kg</div></div>
+        <div class="sum"><div class="k">시간</div><div class="v ins-${dCls}">${dTxt}</div><div class="muted" style="font-size:11px">평균 ${fmtDur(cmp.avgDur)}</div></div>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:8px;text-align:center">최근 ${cmp.n}개 세션 평균과 비교</div>`;
+  }else{
+    html+=`<div class="muted" style="font-size:13px">비교할 지난 세션이 아직 없어요. 다음 운동부터 평균 대비 변화를 보여드릴게요.</div>`;
+  }
+  html+=`</div>`;
+
+  // 3) 부위별 볼륨·세트
+  const pvRows=PARTS.concat('기타').map(p=>({p,v:ps[p].volume,n:ps[p].sets})).filter(o=>o.v>0||o.n>0);
+  const pvMax=Math.max(1,...pvRows.map(o=>o.v));
+  html+=`<div class="card ins-card"><h2 style="margin-top:0">💪 부위별 볼륨 · 세트</h2>`;
+  if(pvRows.length){
+    html+=pvRows.sort((a,b)=>b.v-a.v).map(o=>{const pct=Math.round(o.v/pvMax*100);
+      return `<div style="margin-bottom:10px">
+        <div class="spread" style="font-size:13px;margin-bottom:4px">
+          <span style="font-weight:700"><span class="part-dot" style="background:var(--part-${o.p});margin-right:6px;vertical-align:middle"></span>${o.p}</span>
+          <span class="muted">${o.v.toLocaleString()}kg · ${o.n}세트</span></div>
+        <div class="goalbar"><div class="goalfill" style="width:${pct}%;background:var(--part-${o.p})"></div></div>
+      </div>`;}).join('');
+  }else{
+    html+=`<div class="muted" style="font-size:13px">기록된 세트가 없어요.</div>`;
+  }
+  html+=`</div>`;
+
+  // 4) 근육 피로도 맵(자체 SVG 인체도)
+  html+=`<div class="card ins-card"><h2 style="margin-top:0">🧍 근육 피로도 맵</h2>
+    ${fatigueMapSVG(ps)}
+    <div class="muted" style="font-size:11px;text-align:center;margin-top:6px">색이 진할수록 이번 세션에서 많이 쓴 부위예요.</div></div>`;
+
+  // 5) 세션 볼륨 누적 그래프(doneAt 있을 때만)
+  if(timeline.length>=2){
+    html+=`<div class="card ins-card"><h2 style="margin-top:0">📈 볼륨 누적 추이</h2>
+      ${cumVolumeSVG(timeline)}
+      <div class="muted" style="font-size:11px;text-align:center;margin-top:6px">세트를 완료한 순서대로 쌓인 볼륨이에요.</div></div>`;
+  }
+
   html+=`<button class="btn mt12" onclick="closeSheet()">확인</button>`;
-  openSheet(html);
+  return html;
+}
+/* 누적 볼륨 라인 그래프(자체 SVG). timeline=[{t,cum}]. */
+function cumVolumeSVG(timeline){
+  const W=280,H=90,pad=4;
+  const max=Math.max(1,...timeline.map(p=>p.cum));
+  const n=timeline.length;
+  const x=i=>pad+(n<=1?0:(i/(n-1))*(W-pad*2));
+  const y=v=>H-pad-(v/max)*(H-pad*2);
+  const pts=timeline.map((p,i)=>x(i).toFixed(1)+','+y(p.cum).toFixed(1)).join(' ');
+  const dots=timeline.map((p,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(p.cum).toFixed(1)}" r="2.5" fill="var(--good)"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" aria-label="볼륨 누적 추이">
+    <polyline points="${pts}" fill="none" stroke="var(--good)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+  </svg>`;
 }
 function elapsedSec(){const s=activeSession();return s?Math.max(0,Math.round((Date.now()-s.startedAt)/1000)):0;}
 function fmtDur(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60,z=n=>String(n).padStart(2,'0');
@@ -1192,9 +1276,10 @@ function quickEx(name,part){if(!DB.workouts[cur])DB.workouts[cur]=[];
   DB.workouts[cur].push({name,part:part||partOf(name),sets:[{weight:'',reps:'',done:false,sid:curSid()}]});save();renderAll();}
 function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
   sets.push({weight:last.weight||'',reps:last.reps||'',done:false,sid:curSid()});save();renderAll();}
-/* 번핏식: 세트 '완료 체크' 토글. 미완료→완료로 켤 때 자동휴식(autoRest) 시작 */
+/* 번핏식: 세트 '완료 체크' 토글. 미완료→완료로 켤 때 자동휴식(autoRest) 시작
+   완료 시 doneAt(타임스탬프) 기록 → 세션 누적볼륨 그래프용. 해제 시 제거. */
 function toggleSetDone(i,j){const set=DB.workouts[cur][i].sets[j];const nowDone=!set.done;
-  set.done=nowDone;save();renderAll();
+  set.done=nowDone;if(nowDone)set.doneAt=Date.now();else delete set.doneAt;save();renderAll();
   if(nowDone && DB.settings.autoRest!==false)startRest(restDefault());}
 function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
   if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
@@ -1277,6 +1362,108 @@ function sessionSummary(s){
   });}
   return {nEx:Object.keys(byName).length,nSets,volume:Math.round(volume),
     durationSec:s.durationSec||0,prHits:s.prHits||[]};
+}
+
+/* ----- 운동 인사이트(종료 화면) 집계 — 모두 순수, DB.workouts/sessions 만 읽음 -----
+   설계: 세션 식별은 세트의 sid. 옛 데이터(sid/doneAt 없음)는 우아하게 생략/단순화. */
+
+/* 추정 칼로리(휴리스틱, 라벨은 '추정'). 근거: 근력운동 시간당 ~5kcal/분(약 300/h)을
+   기준으로, 들어올린 볼륨 1톤당 +6kcal 가산. 데이터로만 산출 가능한 가벼운 근사치. */
+function estimateCalories(durationSec,volume){
+  const byTime=(durationSec/60)*5;          // 분당 5kcal
+  const byVol=(volume/1000)*6;              // 볼륨 1톤당 6kcal
+  return Math.max(0,Math.round(byTime+byVol));
+}
+
+/* 세션(sid)의 부위별 {volume,sets}. PARTS+기타 키 항상 존재(0 포함). */
+function sessionPartStats(sid){
+  const out={};PARTS.concat('기타').forEach(p=>out[p]={volume:0,sets:0});
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    const part=ex.part||partOf(ex.name);const key=(part in out)?part:'기타';
+    ex.sets.forEach(st=>{if(st.sid!==sid)return;
+      out[key].sets++;out[key].volume+=(+st.weight||0)*(+st.reps||0);});
+  });}
+  PARTS.concat('기타').forEach(p=>out[p].volume=Math.round(out[p].volume));
+  return out;
+}
+
+/* 완료된(종료된) 다른 세션들의 볼륨/시간 평균과 이번 세션 비교.
+   비교 표본(이번 제외 완료세션)이 없으면 null → 호출부에서 안내/생략. */
+function sessionAvgCompare(s){
+  const others=[];
+  for(const d in DB.sessions){(DB.sessions[d]||[]).forEach(x=>{
+    if(x.id===s.id||!x.endedAt)return;
+    others.push({vol:sessionSummary(x).volume,dur:x.durationSec||0});});}
+  if(!others.length)return null;
+  const avgVol=Math.round(others.reduce((a,b)=>a+b.vol,0)/others.length);
+  const avgDur=Math.round(others.reduce((a,b)=>a+b.dur,0)/others.length);
+  const cs=sessionSummary(s);
+  return {n:others.length,avgVol,avgDur,
+    volDelta:cs.volume-avgVol,durDelta:(s.durationSec||0)-avgDur};
+}
+
+/* 세션(sid)의 완료시각(doneAt) 기준 누적 볼륨 추이.
+   doneAt 가 있는 완료 세트만. 없으면 [] → 그래프 생략. */
+function sessionVolumeTimeline(sid){
+  const pts=[];
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    ex.sets.forEach(st=>{if(st.sid!==sid||!st.doneAt)return;
+      pts.push({t:st.doneAt,v:(+st.weight||0)*(+st.reps||0)});});
+  });}
+  pts.sort((a,b)=>a.t-b.t);
+  let cum=0;return pts.map(p=>{cum+=p.v;return {t:p.t,cum:Math.round(cum)};});
+}
+
+/* 누적 완료 세션 수(N번째 기록). endedAt 있는 세션만 카운트. */
+function sessionCount(){
+  let n=0;for(const d in DB.sessions){(DB.sessions[d]||[]).forEach(x=>{if(x.endedAt)n++;});}
+  return n;
+}
+
+/* 부위 → 인체도 SVG 영역 매핑(앞/뒤). 우리 자체 제작 단순 SVG. */
+const BODY_REGIONS={
+  가슴:['chest'], 어깨:['shoulderL','shoulderR'], 팔:['armL','armR'],
+  복근:['abs'], 하체:['thighL','thighR','calfL','calfR'],
+  등:['back'], 유산소:['cardio']
+};
+/* 부위별 볼륨 → 0~1 강도. 최대 부위를 1로 정규화. */
+function fatigueIntensity(partStats){
+  const max=Math.max(0,...PARTS.map(p=>partStats[p]?partStats[p].volume:0));
+  const out={};PARTS.forEach(p=>{out[p]=max>0?(partStats[p].volume/max):0;});
+  return out;
+}
+/* 강도(0~1)를 부위색의 채움 불투명도로. 0이면 회색 빈 영역. */
+function fatigueFill(part,intensity){
+  if(intensity<=0)return 'fill:var(--line);opacity:.5';
+  const op=(0.18+intensity*0.82).toFixed(2);  // 약하게라도 보이게 0.18 하한
+  return `fill:var(--part-${part});opacity:${op}`;
+}
+/* 자체 제작 인체도(앞/뒤) SVG. 부위별 볼륨 비중으로 색 농도 표시. */
+function fatigueMapSVG(partStats){
+  const it=fatigueIntensity(partStats);
+  const R=(part)=>fatigueFill(part,it[part]||0);
+  // 앞면: 가슴/어깨/팔/복근/하체. 뒷면: 등/어깨/하체. 단순 도형으로 구성.
+  return `<svg viewBox="0 0 200 150" width="100%" style="max-width:280px;display:block;margin:0 auto" aria-label="근육 피로도 맵">
+    <!-- 앞면 -->
+    <g>
+      <!-- 머리 --><circle cx="50" cy="18" r="9" fill="var(--surface3)"/>
+      <!-- 어깨 --><rect x="28" y="30" width="11" height="11" rx="4" style="${R('어깨')}"/><rect x="61" y="30" width="11" height="11" rx="4" style="${R('어깨')}"/>
+      <!-- 가슴 --><rect x="36" y="32" width="28" height="16" rx="5" style="${R('가슴')}"/>
+      <!-- 복근 --><rect x="40" y="50" width="20" height="20" rx="4" style="${R('복근')}"/>
+      <!-- 팔 --><rect x="25" y="42" width="9" height="26" rx="4" style="${R('팔')}"/><rect x="66" y="42" width="9" height="26" rx="4" style="${R('팔')}"/>
+      <!-- 하체 --><rect x="38" y="72" width="10" height="36" rx="4" style="${R('하체')}"/><rect x="52" y="72" width="10" height="36" rx="4" style="${R('하체')}"/>
+      <text x="50" y="125" text-anchor="middle" font-size="9" fill="var(--muted)">앞</text>
+    </g>
+    <!-- 뒷면 -->
+    <g transform="translate(100,0)">
+      <circle cx="50" cy="18" r="9" fill="var(--surface3)"/>
+      <rect x="28" y="30" width="11" height="11" rx="4" style="${R('어깨')}"/><rect x="61" y="30" width="11" height="11" rx="4" style="${R('어깨')}"/>
+      <!-- 등 --><rect x="36" y="32" width="28" height="36" rx="5" style="${R('등')}"/>
+      <rect x="25" y="42" width="9" height="26" rx="4" style="${R('팔')}"/><rect x="66" y="42" width="9" height="26" rx="4" style="${R('팔')}"/>
+      <rect x="38" y="72" width="10" height="36" rx="4" style="${R('하체')}"/><rect x="52" y="72" width="10" height="36" rx="4" style="${R('하체')}"/>
+      <text x="50" y="125" text-anchor="middle" font-size="9" fill="var(--muted)">뒤</text>
+    </g>
+  </svg>`;
 }
 
 /* ----- 루틴/프로그램 (분할 저장·불러오기) -----

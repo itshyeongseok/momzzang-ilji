@@ -1313,6 +1313,185 @@ t('PHOTO_MAX/QUALITY 합리적 기본값',()=>{
   assert(ev('PHOTO_QUALITY')>0.5&&ev('PHOTO_QUALITY')<1,'JPEG 품질 0.5~1');
 });
 
+/* ========== 신규(인사이트): 운동 종료 인사이트 화면 ========== */
+t('toggleSetDone: 완료 시 doneAt 기록, 해제 시 제거',()=>{
+  reset();ev("quickEx('벤치프레스');");
+  ev('toggleSetDone(0,0)');
+  assert(typeof DB().workouts['2026-06-27'][0].sets[0].doneAt==='number','완료 시 doneAt 타임스탬프');
+  ev('toggleSetDone(0,0)');
+  assert.strictEqual(DB().workouts['2026-06-27'][0].sets[0].doneAt,undefined,'해제 시 doneAt 제거');
+});
+
+t('estimateCalories: 시간·볼륨 휴리스틱(분당5 + 톤당6)',()=>{
+  // 30분(1800초) + 5000kg = 30*5 + 5*6 = 150+30 = 180
+  assert.strictEqual(ev('estimateCalories(1800,5000)'),180);
+  assert.strictEqual(ev('estimateCalories(0,0)'),0,'무기록 0');
+  assert(ev('estimateCalories(3600,10000)')>ev('estimateCalories(1800,5000)'),'길수록/무거울수록 큼');
+});
+
+t('sessionPartStats: 세션 부위별 볼륨·세트수 집계(PARTS 키 항상 존재)',()=>{
+  reset();
+  ev('startSession();');
+  ev("quickEx('벤치프레스');"); // 가슴, sid 찍힘
+  ev("setVal(0,0,'weight','60');setVal(0,0,'reps','10');"); // 600
+  ev('addSet(0)');ev("setVal(0,1,'weight','60');setVal(0,1,'reps','10');"); // +600
+  ev("quickEx('스쿼트');"); // 하체
+  ev("setVal(1,0,'weight','100');setVal(1,0,'reps','5');"); // 500
+  const sid=DB().settings.activeSessionId;
+  const ps=ev(`sessionPartStats('${sid}')`);
+  assert.strictEqual(ps['가슴'].volume,1200,'가슴 볼륨 1200');
+  assert.strictEqual(ps['가슴'].sets,2,'가슴 2세트');
+  assert.strictEqual(ps['하체'].volume,500,'하체 볼륨 500');
+  assert.strictEqual(ps['하체'].sets,1,'하체 1세트');
+  assert.strictEqual(ps['등'].volume,0,'기록 없는 부위 0');
+  assert('기타' in ps,'기타 키 존재');
+});
+
+t('sessionAvgCompare: 표본 없으면 null, 있으면 평균 대비 델타',()=>{
+  reset();
+  // 첫 세션(완료) — 볼륨 1000, 30분
+  ev('startSession();');
+  ev("quickEx('스쿼트');setVal(0,0,'weight','100');setVal(0,0,'reps','10');"); // 1000
+  ev('endSession();');
+  // 두 번째 세션 — id 충돌(같은 ms) 방지 위해 첫 세션 id를 고정해 분리
+  ev("DB.sessions['2026-06-27'][0].id='sA';DB.workouts['2026-06-27'][0].sets.forEach(st=>st.sid='sA');save();");
+  ev('cur="2026-06-28";startSession();');
+  ev("DB.settings.activeSessionId='sB';DB.sessions['2026-06-28'][0].id='sB';");
+  ev("quickEx('스쿼트');setVal(0,0,'weight','100');setVal(0,0,'reps','16');"); // 1600
+  // 인위적 durationSec 부여(시간 비교)
+  ev('var _s2=activeSession();_s2.durationSec=1200;'); // 20분, s1은 ~0초
+  const cmp=ev('sessionAvgCompare(activeSession())');
+  assert(cmp,'표본 있으면 객체 반환');
+  assert.strictEqual(cmp.n,1,'비교 표본 1개(s1)');
+  assert.strictEqual(cmp.avgVol,1000,'평균 볼륨=s1의 1000');
+  assert.strictEqual(cmp.volDelta,600,'1600-1000=+600');
+});
+
+t('sessionAvgCompare: 완료 세션이 자기 하나뿐이면 null',()=>{
+  reset();ev('startSession();');
+  ev("quickEx('스쿼트');setVal(0,0,'weight','100');setVal(0,0,'reps','5');");
+  const cmp=ev('sessionAvgCompare(activeSession())');
+  assert.strictEqual(cmp,null,'비교 대상(다른 완료세션) 없음');
+});
+
+t('sessionVolumeTimeline: doneAt 순 누적, 없으면 빈 배열',()=>{
+  reset();ev('startSession();');
+  const sid=DB().settings.activeSessionId;
+  // doneAt 없는 상태(완료 안 함) → 빈 배열
+  ev("quickEx('스쿼트');setVal(0,0,'weight','100');setVal(0,0,'reps','5');");
+  assert.strictEqual(ev(`sessionVolumeTimeline('${sid}').length`),0,'doneAt 없으면 빈 배열');
+  // doneAt 수동 부여(완료 순서: set0 t=100(500), set1 t=200(300))
+  ev('addSet(0);');
+  ev("setVal(0,1,'weight','60');setVal(0,1,'reps','5');"); // 300
+  ev("DB.workouts['2026-06-27'][0].sets[1].doneAt=200;DB.workouts['2026-06-27'][0].sets[0].doneAt=100;save();");
+  const tl=ev(`sessionVolumeTimeline('${sid}')`);
+  assert.strictEqual(tl.length,2,'완료 세트 2개');
+  assert.strictEqual(tl[0].cum,500,'첫 누적 500');
+  assert.strictEqual(tl[1].cum,800,'둘째 누적 800');
+  assert(tl[0].t<tl[1].t,'doneAt 오름차순');
+});
+
+t('sessionCount: 종료된(endedAt) 세션만 N으로 카운트',()=>{
+  reset();
+  assert.strictEqual(ev('sessionCount()'),0,'없으면 0');
+  ev('startSession();endSession();');
+  assert.strictEqual(ev('sessionCount()'),1,'종료 1회→1');
+  ev('cur="2026-06-28";startSession();'); // 진행 중(미종료)
+  assert.strictEqual(ev('sessionCount()'),1,'진행 중은 미포함');
+  ev('endSession();');
+  assert.strictEqual(ev('sessionCount()'),2,'종료 2회→2');
+});
+
+t('fatigueIntensity: 최대 부위=1, 나머지 비례',()=>{
+  reset();
+  const ps=ev("({가슴:{volume:1000,sets:2},등:{volume:500,sets:1},어깨:{volume:0,sets:0},팔:{volume:0,sets:0},하체:{volume:0,sets:0},복근:{volume:0,sets:0},유산소:{volume:0,sets:0},기타:{volume:0,sets:0}})");
+  ctx.__ps=ps;
+  const it=ev('fatigueIntensity(__ps)');
+  assert.strictEqual(it['가슴'],1,'최대 부위 1.0');
+  assert.strictEqual(it['등'],0.5,'절반=0.5');
+  assert.strictEqual(it['어깨'],0,'없으면 0');
+});
+
+t('BODY_REGIONS: 7부위 매핑 존재',()=>{
+  reset();
+  ['가슴','등','어깨','팔','하체','복근','유산소'].forEach(p=>
+    assert(ev(`Array.isArray(BODY_REGIONS['${p}'])&&BODY_REGIONS['${p}'].length>0`),p+' 영역 매핑'));
+});
+
+t('fatigueMapSVG / cumVolumeSVG: 유효 SVG 문자열 생성(무에러)',()=>{
+  reset();
+  const ps=ev("sessionPartStats('nope')"); // 빈 통계
+  ctx.__ps=ps;
+  const svg=ev('fatigueMapSVG(__ps)');
+  assert(svg.startsWith('<svg')&&svg.includes('</svg>'),'인체도 SVG');
+  assert(svg.includes('앞')&&svg.includes('뒤'),'앞/뒤 두 면');
+  const tl=ev('[{t:1,cum:100},{t:2,cum:250}]');ctx.__tl=tl;
+  const line=ev('cumVolumeSVG(__tl)');
+  assert(line.includes('<polyline')&&line.includes('points='),'누적 라인 그래프');
+});
+
+t('viewInsight: 종료 세션 인사이트 렌더 무에러 + 핵심 요소 포함',()=>{
+  reset();
+  ev('startSession();');
+  ev("quickEx('벤치프레스');setVal(0,0,'weight','60');setVal(0,0,'reps','10');toggleSetDone(0,0);");
+  ev("quickEx('스쿼트');setVal(1,0,'weight','100');setVal(1,0,'reps','5');toggleSetDone(1,0);");
+  ev('endSession();');
+  const s=ev("DB.sessions['2026-06-27'][0]");ctx.__s=s;
+  const v=ev('viewInsight(__s)');
+  assert(v.includes('소요시간'),'소요시간');
+  assert(v.includes('추정'),'추정 칼로리 라벨');
+  assert(v.includes('kcal'),'칼로리 단위');
+  assert(v.includes('총 볼륨'),'총 볼륨');
+  assert(v.includes('부위별 볼륨'),'부위별 볼륨');
+  assert(v.includes('근육 피로도 맵'),'피로도 맵');
+  assert(v.includes('<svg'),'SVG 인체도');
+  assert(v.includes('번째 운동 기록 완료')||v.includes('첫 운동 기록 완료'),'N번째 축하');
+  assert(v.includes('평균 대비'),'평균 대비 섹션');
+  assert(v.includes('확인'),'확인 버튼');
+});
+
+t('viewInsight: 완료세트(doneAt) 2개 이상이면 누적 그래프 포함',()=>{
+  reset();
+  ev('startSession();');
+  ev("quickEx('스쿼트');setVal(0,0,'weight','100');setVal(0,0,'reps','5');toggleSetDone(0,0);");
+  ev('addSet(0);setVal(0,1,\'weight\',\'100\');setVal(0,1,\'reps\',\'5\');toggleSetDone(0,1);');
+  ev('endSession();');
+  const s=ev("DB.sessions['2026-06-27'][0]");ctx.__s=s;
+  const v=ev('viewInsight(__s)');
+  assert(v.includes('볼륨 누적 추이'),'누적 그래프 표시');
+});
+
+t('viewInsight: 옛 데이터(doneAt 없음)는 누적 그래프 우아하게 생략',()=>{
+  reset();
+  // 세션은 있으나 세트에 doneAt 없음(옛 기록)
+  ev("DB.sessions['2026-06-27']=[{id:'sX',startedAt:1,endedAt:2,durationSec:1800}];");
+  ev("DB.workouts['2026-06-27']=[{name:'스쿼트',part:'하체',sets:[{weight:'100',reps:'5',sid:'sX'}]}];save();");
+  const s=ev("DB.sessions['2026-06-27'][0]");ctx.__s=s;
+  const v=ev('viewInsight(__s)');
+  assert(!v.includes('볼륨 누적 추이'),'doneAt 없으면 누적 그래프 생략');
+  assert(v.includes('부위별 볼륨'),'그래도 다른 섹션은 렌더');
+});
+
+t('viewInsight: 비교 표본 없으면 안내문구(평균 대비 비교 생략)',()=>{
+  reset();
+  ev('startSession();');
+  ev("quickEx('스쿼트');setVal(0,0,'weight','100');setVal(0,0,'reps','5');toggleSetDone(0,0);");
+  ev('endSession();');
+  const s=ev("DB.sessions['2026-06-27'][0]");ctx.__s=s;
+  const v=ev('viewInsight(__s)');
+  assert(v.includes('비교할 지난 세션이 아직 없어요'),'표본 없을 때 안내');
+});
+
+t('endSession → showSessionSummary가 인사이트 시트를 연다(무에러)',()=>{
+  reset();
+  ev('startSession();');
+  ev("quickEx('벤치프레스');setVal(0,0,'weight','60');setVal(0,0,'reps','10');toggleSetDone(0,0);");
+  ev('endSession();');
+  const v=ctx.document.getElementById('sheet').innerHTML;
+  assert(v.includes('오늘의 운동'),'인사이트 시트 헤더');
+  assert(v.includes('근육 피로도 맵'),'시트에 피로도 맵');
+});
+
 console.log('\n'+pass+' passed (sync)');
 
 /* ========== 비동기(사진 흐름): IndexedDB·압축·업로드 가드 ========== */
