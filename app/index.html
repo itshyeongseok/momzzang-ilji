@@ -24,6 +24,9 @@
   --good:#22C55E; --danger:#EF4444; --warn:#F59E0B; --gold:#F59E0B; --chip-dark:#2B3442;
   /* 호환 별칭(기존 코드의 --accent2 참조 유지) */
   --accent2:#3B82F6;
+  /* 부위 색 매핑(라이트 톤) */
+  --part-가슴:#EF4444; --part-등:#3B82F6; --part-어깨:#F59E0B; --part-팔:#8B5CF6;
+  --part-하체:#22C55E; --part-복근:#06B6D4; --part-유산소:#EC4899; --part-기타:#6B7280;
   --safe-top:env(safe-area-inset-top); --safe-bot:env(safe-area-inset-bottom);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -106,6 +109,21 @@ textarea{resize:vertical;min-height:54px}
 .set-check{width:30px;height:30px;border-radius:8px;border:2px solid var(--line);background:var(--surface2);
   display:grid;place-items:center;font-size:15px;color:transparent;cursor:pointer;padding:0}
 .set-check.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+/* 세트 직전기록 고스트 */
+.set-ghost{grid-column:1 / -1;font-size:11px;color:var(--faint);padding:0 0 4px 33px;margin-top:-3px}
+/* 부위 배지 */
+.part-badge{display:inline-block;font-size:11px;font-weight:700;border-radius:7px;padding:2px 8px;
+  vertical-align:middle;margin-right:6px}
+.part-dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+/* 운동 선택 시트 */
+.ex-row{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.ex-row:last-child{border-bottom:none}
+.ex-row .exn{flex:1;font-weight:600}
+.ex-row .fav{background:none;border:none;font-size:18px;padding:2px 4px;color:var(--faint)}
+.ex-row .fav.on{color:var(--gold)}
+.ex-list{max-height:46vh;overflow-y:auto;margin-top:4px}
+.chiprow{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;-webkit-overflow-scrolling:touch}
+.chiprow .chip{flex:none}
 
 /* habit */
 .habit{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
@@ -247,7 +265,7 @@ svg.chart{width:100%;height:140px;display:block;margin-top:6px}
 /* ============ 저장소 ============ */
 const KEY='momzzang_v1';
 const DEFAULT={
-  workouts:{}, meals:{}, habits:{}, body:[], sessions:{},
+  workouts:{}, meals:{}, habits:{}, body:[], sessions:{}, exDB:[],
   habitDefs:[
     {id:'sleep', name:'수면', type:'num', unit:'시간', step:0.5, icon:'😴'},
     {id:'water', name:'물', type:'num', unit:'컵', step:1, icon:'💧'},
@@ -263,6 +281,34 @@ function load(){
   return structuredClone(DEFAULT);
 }
 function save(){localStorage.setItem(KEY,JSON.stringify(DB));}
+
+/* ============ 운동 마스터(부위별) ============ */
+const PARTS=['가슴','등','어깨','팔','하체','복근','유산소'];
+/* 시드: 부위별 대표 운동. 사용자 추가분(DB.exDB)과 병합해서 사용. */
+const EX_SEED=[
+  ['가슴',['벤치프레스','인클라인벤치','덤벨프레스','체스트플라이','딥스','푸시업']],
+  ['등',['데드리프트','랫풀다운','바벨로우','시티드로우','풀업','티바로우']],
+  ['어깨',['오버헤드프레스','사이드 레터럴 레이즈','페이스풀','리어델트 플라이','아놀드 프레스']],
+  ['팔',['바벨컬','덤벨컬','해머컬','케이블푸시다운','라잉 익스텐션','프리처컬']],
+  ['하체',['스쿼트','레그프레스','레그 익스텐션','레그 컬','루마니안 데드리프트','런지','카프레이즈']],
+  ['복근',['크런치','행잉 레그레이즈','플랭크','케이블 크런치']],
+  ['유산소',['러닝','사이클','로잉','인터벌']]
+].flatMap(([part,names])=>names.map(name=>({id:'ex_'+part+'_'+name,name,part,fav:false})));
+/* 시드 + 사용자 추가분 병합(이름 기준 사용자분 우선). */
+function allEx(){
+  const map={};EX_SEED.forEach(e=>map[e.name]={...e});
+  (DB.exDB||[]).forEach(e=>{map[e.name]={...(map[e.name]||{}),...e};});
+  return Object.values(map);
+}
+/* 운동 이름 → 부위. 마스터에 없으면 '기타'. 레거시 종목 폴백. */
+function partOf(name){const e=allEx().find(x=>x.name===name);return (e&&e.part)||'기타';}
+/* 즐겨찾기 여부(사용자분 우선). */
+function isFav(name){const u=(DB.exDB||[]).find(e=>e.name===name);if(u&&u.fav!=null)return !!u.fav;
+  const s=EX_SEED.find(e=>e.name===name);return !!(s&&s.fav);}
+function toggleFav(name){if(!DB.exDB)DB.exDB=[];
+  let u=DB.exDB.find(e=>e.name===name);
+  if(!u){u={id:'ex_u'+Date.now(),name,part:partOf(name),fav:false};DB.exDB.push(u);}
+  u.fav=!isFav(name);save();}
 
 /* ============ 날짜 ============ */
 function ymd(d){const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());}
@@ -515,25 +561,27 @@ function viewWorkout(){
   if(!list.length)html+=`<div class="empty">아직 기록이 없어요.<br>아래에서 운동을 추가해보세요.</div>`;
   list.forEach((ex,i)=>{
     const best=exerciseMaxWeight(ex.name);
-    html+=`<div class="ex"><div class="ex-head"><span class="name">${esc(ex.name)}${best>0?` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆${best}kg</span>`:''}</span>
+    const part=ex.part||partOf(ex.name);
+    html+=`<div class="ex"><div class="ex-head"><span class="name">${partBadge(part)}${esc(ex.name)}${best>0?` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆${best}kg</span>`:''}</span>
       <button class="btn sm sec" onclick="addSet(${i})">+ 세트</button>
       <button class="x" onclick="delEx(${i})">✕</button></div>
       <div class="setline"><div class="n"></div><div class="set-unit">무게(kg)</div><div class="set-unit">횟수</div><div class="set-unit">완료</div><div></div></div>`;
     ex.sets.forEach((s,j)=>{
+      const pv=prevSetFor(ex.name,j);
       html+=`<div class="setline${s.done?' set-done':''}"><div class="n">${j+1}</div>
-        <input type="number" inputmode="decimal" value="${s.weight??''}" placeholder="0" onchange="setVal(${i},${j},'weight',this.value)">
-        <input type="number" inputmode="numeric" value="${s.reps??''}" placeholder="0" onchange="setVal(${i},${j},'reps',this.value)">
+        <input type="number" inputmode="decimal" value="${s.weight??''}" placeholder="${pv?(pv.weight??0):'0'}" onchange="setVal(${i},${j},'weight',this.value)">
+        <input type="number" inputmode="numeric" value="${s.reps??''}" placeholder="${pv?(pv.reps??0):'0'}" onchange="setVal(${i},${j},'reps',this.value)">
         <button class="set-check${s.done?' on':''}" onclick="toggleSetDone(${i},${j})" aria-label="세트 완료">✓</button>
         <button class="x" onclick="delSet(${i},${j})">✕</button></div>`;
+      if(pv)html+=`<div class="set-ghost">지난 기록 ${pv.weight||0}kg × ${pv.reps||0}회</div>`;
     });
     html+=`</div>`;
   });
   html+=`</div>`;
   // add bar
   html+=`<div class="card"><h2>운동 추가</h2>
-    <input type="text" id="exName" placeholder="예: 벤치프레스, 스쿼트, 데드리프트">
-    <button class="btn mt8" onclick="addEx()">+ 추가</button>
-    ${commonExChips()}
+    <button class="btn" onclick="openExPicker()">+ 운동 추가</button>
+    <div class="muted" style="font-size:12px;text-align:center;margin-top:8px">부위별로 골라 담거나 직접 추가할 수 있어요.</div>
     ${prev?`<div class="divider"></div><div class="muted" style="font-size:12px;margin-bottom:7px">📋 최근 운동 (${prev.date}) 불러오기</div>
       <button class="btn sec sm" onclick="copyWorkout('${prev.date}')">그대로 가져오기</button>`:''}
   </div>`;
@@ -547,19 +595,87 @@ function viewWorkout(){
   }
   return html;
 }
-function commonExChips(){
-  const common=['벤치프레스','인클라인벤치','스쿼트','데드리프트','랫풀다운','바벨로우','오버헤드프레스','덤벨컬','레그프레스','케이블푸시다운'];
-  return `<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">`+
-    common.map(c=>`<button class="chip" onclick="quickEx('${c}')">${c}</button>`).join('')+`</div>`;
+/* 부위 색 배지 */
+function partBadge(part){const p=PARTS.includes(part)?part:'기타';
+  return `<span class="part-badge" style="background:color-mix(in srgb, var(--part-${p}) 14%, white);color:var(--part-${p})">${p}</span>`;}
+
+/* ----- 운동 선택 시트(부위 필터·검색·즐겨찾기·직접추가) ----- */
+let exPickPart='전체', exPickQuery='';
+function openExPicker(){exPickPart='전체';exPickQuery='';renderExPicker();}
+function renderExPicker(){
+  const filters=['전체',...PARTS,'⭐'];
+  const chips=filters.map(f=>`<button class="chip${exPickPart===f?' on':''}" onclick="setExPart('${f}')">${f}</button>`).join('');
+  const q=exPickQuery.trim();
+  let list=allEx();
+  if(exPickPart==='⭐')list=list.filter(e=>isFav(e.name));
+  else if(exPickPart!=='전체')list=list.filter(e=>e.part===exPickPart);
+  if(q)list=list.filter(e=>e.name.includes(q));
+  // 즐겨찾기 먼저, 그다음 부위/이름
+  list.sort((a,b)=>(isFav(b.name)-isFav(a.name))||a.name.localeCompare(b.name,'ko'));
+  let rows=list.map(e=>`<div class="ex-row" onclick="pickEx('${esc(e.name)}','${e.part}')">
+      <span class="part-dot" style="background:var(--part-${e.part})"></span>
+      <span class="exn">${esc(e.name)}</span>
+      <button class="fav${isFav(e.name)?' on':''}" onclick="event.stopPropagation();favEx('${esc(e.name)}')">${isFav(e.name)?'★':'☆'}</button>
+    </div>`).join('');
+  if(!list.length)rows=`<div class="empty">해당하는 운동이 없어요.<br>아래에서 직접 추가해보세요.</div>`;
+  const html=`<h3>운동 선택</h3>
+    <div class="chiprow">${chips}</div>
+    <input type="text" id="exSearch" placeholder="🔍 운동 검색" value="${esc(exPickQuery)}" oninput="exPickQuery=this.value;renderExList()">
+    <div class="ex-list" id="exPickList">${rows}</div>
+    <div class="divider"></div>
+    <div class="muted" style="font-size:12px;margin-bottom:7px">+ 직접 추가</div>
+    <input type="text" id="newExName" placeholder="새 운동 이름">
+    <div class="chiprow mt8" id="newExParts">${PARTS.map((p,i)=>`<button class="chip${i===0?' on':''}" data-np="${p}" onclick="pickNewPart(this)">${p}</button>`).join('')}</div>
+    <button class="btn mt8" onclick="addNewEx()">+ 추가하고 담기</button>
+    <button class="btn sec mt8" onclick="closeSheet()">닫기</button>`;
+  openSheet(html);
+}
+function renderExList(){ // 검색 입력 시 리스트만 갱신(포커스 유지)
+  const q=exPickQuery.trim();
+  let list=allEx();
+  if(exPickPart==='⭐')list=list.filter(e=>isFav(e.name));
+  else if(exPickPart!=='전체')list=list.filter(e=>e.part===exPickPart);
+  if(q)list=list.filter(e=>e.name.includes(q));
+  list.sort((a,b)=>(isFav(b.name)-isFav(a.name))||a.name.localeCompare(b.name,'ko'));
+  const el=document.getElementById('exPickList');if(!el)return;
+  el.innerHTML=list.length?list.map(e=>`<div class="ex-row" onclick="pickEx('${esc(e.name)}','${e.part}')">
+      <span class="part-dot" style="background:var(--part-${e.part})"></span>
+      <span class="exn">${esc(e.name)}</span>
+      <button class="fav${isFav(e.name)?' on':''}" onclick="event.stopPropagation();favEx('${esc(e.name)}')">${isFav(e.name)?'★':'☆'}</button>
+    </div>`).join('')
+    :`<div class="empty">해당하는 운동이 없어요.<br>아래에서 직접 추가해보세요.</div>`;
+}
+function setExPart(p){exPickPart=p;renderExPicker();}
+function favEx(name){toggleFav(name);renderExList();}
+function pickEx(name,part){quickEx(name,part);closeSheet();}
+let newExPart='가슴';
+function pickNewPart(el){newExPart=el.dataset.np;
+  document.querySelectorAll('#newExParts [data-np]').forEach(c=>c.classList.toggle('on',c===el));}
+function addNewEx(){const n=(document.getElementById('newExName').value||'').trim();if(!n){toast('운동 이름을 입력해주세요');return;}
+  if(!DB.exDB)DB.exDB=[];
+  if(!DB.exDB.some(e=>e.name===n)&&!EX_SEED.some(e=>e.name===n))
+    DB.exDB.push({id:'ex_u'+Date.now(),name:n,part:newExPart,fav:false});
+  quickEx(n,newExPart);closeSheet();
 }
 function lastWorkoutBefore(date){
   const ks=Object.keys(DB.workouts).filter(k=>k<date&&DB.workouts[k].length).sort();
   if(!ks.length)return null;const k=ks[ks.length-1];return {date:k,list:DB.workouts[k]};
 }
-function addEx(){const n=document.getElementById('exName').value.trim();if(!n)return;quickEx(n);}
+/* 같은 이름 운동의 직전(현재 날짜 이전) 기록을 찾아 해당 세트 번호 값을 반환.
+   세트 번호가 지난 기록보다 많으면 지난 기록의 마지막 세트로 폴백. 없으면 null. */
+function prevSetFor(name,idx){
+  const ks=Object.keys(DB.workouts).filter(k=>k<cur).sort();
+  for(let p=ks.length-1;p>=0;p--){
+    const ex=(DB.workouts[ks[p]]||[]).find(e=>e.name===name);
+    if(!ex||!ex.sets.length)continue;
+    const s=ex.sets[idx]||ex.sets[ex.sets.length-1];
+    if((+s.weight||0)>0||(+s.reps||0)>0)return {date:ks[p],weight:s.weight,reps:s.reps};
+  }
+  return null;
+}
 function curSid(){return (isSessionActive()&&DB.settings.activeSessionDate===cur)?DB.settings.activeSessionId:undefined;}
-function quickEx(name){if(!DB.workouts[cur])DB.workouts[cur]=[];
-  DB.workouts[cur].push({name,sets:[{weight:'',reps:'',done:false,sid:curSid()}]});save();renderAll();}
+function quickEx(name,part){if(!DB.workouts[cur])DB.workouts[cur]=[];
+  DB.workouts[cur].push({name,part:part||partOf(name),sets:[{weight:'',reps:'',done:false,sid:curSid()}]});save();renderAll();}
 function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
   sets.push({weight:last.weight||'',reps:last.reps||'',done:false,sid:curSid()});save();renderAll();}
 /* 번핏식: 세트 '완료 체크' 토글. 미완료→완료로 켤 때 자동휴식(autoRest) 시작 */
@@ -576,7 +692,7 @@ function setVal(i,j,f,v){DB.workouts[cur][i].sets[j][f]=v;save();
       toast('🏆 '+name+' 신기록 '+w+'kg!');if(navigator.vibrate)navigator.vibrate(120);}}
   document.querySelector('#view .card .tag')&&renderAll();}
 function copyWorkout(date){
-  DB.workouts[cur]=DB.workouts[date].map(e=>({name:e.name,sets:e.sets.map(s=>({weight:s.weight,reps:s.reps}))}));
+  DB.workouts[cur]=DB.workouts[date].map(e=>({name:e.name,part:e.part||partOf(e.name),sets:e.sets.map(s=>({weight:s.weight,reps:s.reps}))}));
   save();renderAll();toast('지난 운동을 불러왔어요');
 }
 /* 개인 최고기록: 저장된 운동 데이터에서 계산(별도 저장 없음) */
