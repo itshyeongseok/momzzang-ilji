@@ -1132,6 +1132,70 @@ t('applyRemoteState 중에는 재푸시 루프가 안 생긴다',()=>{
   ev("SYNC.enabled=false;");
 });
 
+/* ---- 세션 지속성(fix/session-persist) ----
+   실제 supabase-js getSession()/onAuthStateChange 는 type=module 블록이라 헤드리스에서
+   실행 불가(실 네트워크/매직링크도 불가) → 폰 수동검증으로 분리.
+   여기서는 module 의 onSession() 이 의존하는 "클래식 측 계약"을 stub 세션으로 단언한다:
+   세션이 복원되면 SYNC 가 켜지고(email/enabled), pull 결과가 로컬에 반영되며, UI가 '켜짐'을 보인다. */
+
+// module onSession(session) 의 핵심 로직을 클래식 프리미티브로 재현한 stub.
+function applySession(session, remoteRow){
+  ev("SYNC.session="+JSON.stringify(session)+";");
+  if(session){
+    ev("SYNC.enabled=true;SYNC.email="+JSON.stringify(session.user.email||null)+";");
+    if(remoteRow){
+      const merged=ev("mergeStates(localSnapshot(),"+JSON.stringify(remoteRow.data)+",getPulledAt(),"+JSON.stringify(remoteRow.updated_at)+")");
+      if(merged.winner==='remote'){
+        ev("applyRemoteState("+JSON.stringify(remoteRow.data)+");");
+        ev("setPulledAt("+JSON.stringify(remoteRow.updated_at)+");");
+      }
+    }
+  }else{
+    ev("SYNC.enabled=false;SYNC.email=null;setPulledAt(null);");
+  }
+}
+
+t('세션 복원(stub): 저장된 세션이 있으면 SYNC 켜짐 + 이메일 세팅',()=>{
+  reset();
+  applySession({user:{id:'U1',email:'me@example.com'}},null);
+  assert.strictEqual(ev("SYNC.enabled"),true,'enabled');
+  assert.strictEqual(ev("SYNC.email"),'me@example.com','email 세팅');
+  ev("SYNC.enabled=false;SYNC.session=undefined;SYNC.email=null;"); // 격리
+});
+
+t('세션 복원(stub) 후 프로필 카드가 "동기화 켜짐"을 표시',()=>{
+  reset();
+  // viewCloudSync 는 cloudReady()가 true 여야 켜짐 분기로 간다 → supa 임시 주입
+  ev("supa={};SYNC.enabled=true;SYNC.email='me@example.com';");
+  const v=ev("viewCloudSync()");
+  assert(v.includes('동기화 켜짐'),'켜짐 상태 텍스트');
+  assert(v.includes('me@example.com'),'로그인 이메일 표기');
+  assert(v.includes('로그아웃'),'로그아웃 버튼');
+  ev("delete supa;SYNC.enabled=false;SYNC.email=null;"); // 격리
+});
+
+t('세션 복원(stub): 서버가 더 최신이면 초기 pull 이 로컬을 교체',()=>{
+  reset();
+  ev("setPulledAt('2026-06-20T00:00:00Z');"); // 로컬은 오래됨
+  applySession(
+    {user:{id:'U1',email:'me@example.com'}},
+    {data:{workouts:{'2026-06-28':[{name:'벤치프레스',sets:[{weight:'80',reps:'10'}]}]},meals:{},habits:{},body:[],settings:{}},
+     updated_at:'2026-06-28T00:00:00Z'}
+  );
+  assert.strictEqual(ev("workoutVolume(DB.workouts['2026-06-28'])"),800,'원격 상태가 로컬에 적용됨');
+  assert.strictEqual(ev("getPulledAt()"),'2026-06-28T00:00:00Z','pulledAt 갱신');
+  ev("SYNC.enabled=false;SYNC.session=undefined;SYNC.email=null;");
+});
+
+t('세션 없음(stub: SIGNED_OUT 동등) → SYNC 꺼짐 + pulledAt 해제',()=>{
+  reset();
+  ev("SYNC.enabled=true;SYNC.email='me@example.com';setPulledAt('2026-06-28T00:00:00Z');");
+  applySession(null,null);
+  assert.strictEqual(ev("SYNC.enabled"),false,'로그아웃 시 꺼짐');
+  assert.strictEqual(ev("SYNC.email"),null,'이메일 해제');
+  assert.strictEqual(ev("getPulledAt()"),null,'pulledAt 해제');
+});
+
 t('cloudLogin: 잘못된 이메일이면 토스트, SYNC.login 미호출',()=>{
   reset();
   ev("__loginCalls=[];SYNC.login=function(e){__loginCalls.push(e);};");
