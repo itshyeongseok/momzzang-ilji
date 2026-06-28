@@ -1497,6 +1497,11 @@ function loadRoutine(rid){
 
 /* ============ 식단 ============ */
 const MEALTYPES=['아침','점심','저녁','간식'];
+// 고형석 표준식 빠른 추가 프리셋(매번 같은 양). 원탭으로 칼로리·단백질 자동 입력.
+const MEAL_PRESETS=[
+  {name:'오트밀',icon:'🥣',kcal:176,protein:9,memo:'오버나이트 오트밀 (오트밀20g+그릭요거트50g+두유60ml+블루베리20g+꿀5g)'},
+  {name:'쉐이크',icon:'🥤',kcal:216,protein:28,memo:'단백질 쉐이크 (파우더35g+두유200ml)'}
+];
 function viewMeal(){
   const list=DB.meals[cur]||[];
   const kcal=list.reduce((s,x)=>s+(+x.kcal||0),0);
@@ -1518,6 +1523,10 @@ function viewMeal(){
   });
   html+=`</div>`;
   html+=`<div class="card"><h2>식단 추가</h2>
+    <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">빠른 추가</div>
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      ${MEAL_PRESETS.map((p,i)=>`<button class="chip" onclick="addPreset(${i})">${p.icon} ${p.name}</button>`).join('')}
+    </div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
       ${MEALTYPES.map((t,i)=>`<button class="chip ${i===0?'on':''}" data-mt="${t}" onclick="pickMT(this)">${mealIcon(t)} ${t}</button>`).join('')}
     </div>
@@ -1549,6 +1558,12 @@ async function addMeal(){const memo=document.getElementById('mealMemo').value.tr
   mealPhotoPend=null;
   if(!DB.meals[cur])DB.meals[cur]=[];
   DB.meals[cur].push({type:curMT,memo,kcal,protein,photo});save();renderAll();toast(praise());
+}
+// 표준식 프리셋 원탭 추가: 현재 선택된 끼니(curMT)로 메모·kcal·protein 자동 입력.
+function addPreset(i){const p=MEAL_PRESETS[i];if(!p)return;
+  if(!DB.meals[cur])DB.meals[cur]=[];
+  DB.meals[cur].push({type:curMT,memo:p.memo,kcal:String(p.kcal),protein:String(p.protein),photo:null});
+  save();renderAll();toast(praise());
 }
 function delMeal(i){const m=DB.meals[cur][i];if(m&&m.photo)idbDel(m.photo.id).catch(()=>{});
   DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
