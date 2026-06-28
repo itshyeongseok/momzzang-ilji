@@ -98,13 +98,13 @@ create policy "own rows - app_state"
 (플랜 `docs/supabase-plan.md` 3절·1.4절 기반. 사진 **메타**(경로·치수·바이트)만 이 테이블에 저장하고, 실제 이미지 바이너리는 (e)의 Storage 버킷에 저장합니다.)
 
 ```sql
--- 1) 사진 메타. 바이너리는 Storage(photos 버킷). 식단/인바디 사진 공통.
+-- 1) 사진 메타. 바이너리는 Storage(photos 버킷). 식단/인바디/수면 사진 공통.
 create table if not exists public.media (
   id           uuid primary key default gen_random_uuid(),
   user_id      uuid not null references auth.users(id) on delete cascade,
-  kind         text not null check (kind in ('meal','body')),  -- 어떤 탭의 사진인지
-  ref_date     date not null,                                   -- 식단/신체 기록 날짜 'YYYY-MM-DD'
-  storage_path text not null,         -- 예: '<user_id>/meal/2026-06-27/<uuid>.jpg'
+  kind         text not null check (kind in ('meal','body','sleep')),  -- 어떤 탭의 사진인지(식단/인바디/수면)
+  ref_date     date not null,                                   -- 식단/신체/수면 기록 날짜 'YYYY-MM-DD'
+  storage_path text not null,         -- 예: '<user_id>/sleep/2026-06-27/<uuid>.jpg'
   width  int, height int, bytes int,
   created_at   timestamptz not null default now()
 );
@@ -121,6 +121,18 @@ create policy "own rows - media"
   using      ( user_id = (select auth.uid()) )
   with check ( user_id = (select auth.uid()) );
 ```
+
+### (d-2) 이미 `media` 테이블을 만든 경우 — 수면(`sleep`) 허용으로 CHECK 확장 (SQL 1건)
+
+기존에 위 SQL을 `('meal','body')`로 실행했다면, `kind='sleep'` 업로드가 CHECK 제약에 걸려 막힙니다. 아래 SQL **1건**을 SQL Editor에서 한 번 실행해 제약을 확장하세요.
+
+```sql
+-- media.kind 에 'sleep' 추가(수면 분석 이미지 업로드 허용)
+alter table public.media drop constraint if exists media_kind_check;
+alter table public.media add  constraint media_kind_check check (kind in ('meal','body','sleep'));
+```
+
+> **미적용 시 동작:** 로그인 상태에서 수면 이미지를 첨부하면 Storage 업로드/`media` INSERT만 CHECK 위반으로 실패합니다. 앱은 이 실패를 `try/catch`로 흡수하고 **로컬 IndexedDB 사본은 그대로 보존**하므로 앱은 죽지 않고, 그 이미지는 **해당 폰에서만** 보입니다(다른 기기 동기화·주간 코치 전달은 안 됨). 즉 CHECK 확장은 "클라우드 동기화/주간 코치까지 쓰려면 필수, 로컬만이면 선택"입니다. (제약 이름이 `media_kind_check`가 아닐 수 있는데, 그땐 Table editor에서 실제 제약 이름을 확인해 `drop constraint`에 넣으세요.)
 
 ---
 
@@ -179,7 +191,7 @@ create policy "photos: delete own"
 
 1. **비로그인/오프라인(로컬 우선) 먼저:** 로그아웃(또는 비행기모드) 상태에서 홈 **식단 추가 → 📷 사진 첨부**로 한 장 → 추가. 목록에 **썸네일**이 뜨고, 탭하면 크게 보이는지 확인. (이때 네트워크 요청 0 — 개발자도구 Network 탭으로 확인 가능.)
 2. **신체 → 측정 기록 → 📷 인바디 사진** 첨부 → 저장. 기록 목록에 썸네일 표시 확인(주 1회 인바디 용도).
-3. **로그인 후 백업:** (d)~(e) 완료 + 로그인 상태에서 사진 첨부 → 추가. 잠시 뒤 대시보드 **Storage → photos** 에 `<uid>/meal|body/<날짜>/<uuid>.jpg`가, **Table editor → media** 에 메타 행이 생기는지 확인.
+3. **로그인 후 백업:** (d)~(e) 완료 + 로그인 상태에서 사진 첨부 → 추가. 잠시 뒤 대시보드 **Storage → photos** 에 `<uid>/meal|body|sleep/<날짜>/<uuid>.jpg`가, **Table editor → media** 에 메타 행이 생기는지 확인.
 4. **egress(재다운로드) 0 확인:** 같은 사진을 다시 볼 때(앱 재진입/탭 전환) Network 탭에서 Storage 다운로드가 **다시 일어나지 않는지** 확인 — IndexedDB 캐시 히트로 즉시 표시돼야 합니다.
 5. **다른 기기:** 다른 기기/시크릿 창에서 같은 이메일 로그인 → 사진이 signed URL로 받아져 보이고, 이후엔 그 기기의 IndexedDB에 캐시되는지 확인.
 
