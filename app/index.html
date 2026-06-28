@@ -73,6 +73,7 @@ nav button.active{color:var(--accent)}
 .card h2 .tag{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
 .muted{color:var(--muted)}
 .empty{text-align:center;color:var(--muted);padding:26px 10px;font-size:14px}
+.empty-ico{font-size:34px;line-height:1;margin-bottom:10px;opacity:.85}
 .row{display:flex;gap:8px;align-items:center}
 .spread{display:flex;justify-content:space-between;align-items:center}
 label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;font-weight:600}
@@ -92,7 +93,9 @@ textarea{resize:vertical;min-height:54px}
 .chip.on{background:var(--accent-soft);color:var(--accent-strong);border-color:var(--accent)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.x{color:var(--faint);background:none;border:none;font-size:18px;padding:4px 6px}
+.x{color:var(--faint);background:none;border:none;font-size:18px;padding:0;
+  min-width:40px;height:40px;display:inline-grid;place-items:center;border-radius:9px}
+.x:active{background:var(--surface3)}
 .divider{height:1px;background:var(--line);margin:12px 0}
 .pill{display:inline-block;background:var(--surface2);border:1px solid var(--line);border-radius:8px;
   padding:3px 9px;font-size:12px;font-weight:600;margin:0 4px 4px 0;color:var(--text)}
@@ -119,7 +122,8 @@ textarea{resize:vertical;min-height:54px}
 .ex-row{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer}
 .ex-row:last-child{border-bottom:none}
 .ex-row .exn{flex:1;font-weight:600}
-.ex-row .fav{background:none;border:none;font-size:18px;padding:2px 4px;color:var(--faint)}
+.ex-row .fav{background:none;border:none;font-size:18px;padding:0;width:40px;height:40px;
+  display:grid;place-items:center;color:var(--faint)}
 .ex-row .fav.on{color:var(--gold)}
 .ex-list{max-height:46vh;overflow-y:auto;margin-top:4px}
 .chiprow{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;-webkit-overflow-scrolling:touch}
@@ -483,14 +487,25 @@ function saveTodayWeight(){
   save();renderAll();toast('오늘 체중을 기록했어요 💪');
 }
 
+/* 데이터가 전혀 없는 첫 진입인지(운동/식단/습관/신체 모두 비어있음). 가벼운 온보딩 안내용. */
+function isFirstEntry(){
+  return !Object.keys(DB.workouts).length && !Object.keys(DB.meals).length
+    && !Object.keys(DB.habits).length && !DB.body.length;
+}
 function viewHome(){
   const w=DB.workouts[cur]||[];const vol=workoutVolume(w);
-  let html=viewWeeklyGoal()+viewTodayWeight()+viewCalendar();
+  let html='';
+  if(isFirstEntry()){
+    html+=`<div class="card" style="background:var(--accent-soft);border-color:var(--accent)">
+      <div style="font-weight:800;color:var(--accent-strong);font-size:16px;margin-bottom:4px">👋 BULCUP에 오신 걸 환영해요</div>
+      <div class="muted" style="font-size:13px">오늘 체중을 남기거나 첫 운동을 기록하며 시작해보세요. 모든 기록은 이 폰에만 저장돼요.</div></div>`;
+  }
+  html+=viewWeeklyGoal()+viewTodayWeight()+viewCalendar();
   // 오늘 운동 요약 카드
   html+=`<div class="card"><h2>🏋️ 오늘 운동 ${vol?`<span class="tag">볼륨 ${vol.toLocaleString()}kg</span>`:''}</h2>`;
   if(!w.length){
-    html+=`<div class="empty">계획된 운동이 없어요.<br>지금 바로 운동을 기록해보세요!</div>
-      <button class="btn" onclick="setTab('workout')">운동 기록하기</button>`;
+    html+=`<div class="empty"><div class="empty-ico">🏋️</div>아직 오늘 운동이 없어요.<br>지금 바로 시작해볼까요?</div>
+      <button class="btn" onclick="setTab('workout')">오늘 첫 운동 시작하기</button>`;
   }else{
     html+=`<div onclick="setTab('workout')" style="cursor:pointer">${w.map(e=>`<div class="pill">${esc(e.name)} ${e.sets.length}세트</div>`).join('')}</div>
       <button class="btn sec mt12" onclick="setTab('workout')">운동 기록 이어가기</button>`;
@@ -568,7 +583,7 @@ function viewStats(){
   // 데이터 전무 시 빈 상태 안내
   if(!totalDays && !last){
     return `<div class="card"><h2>📊 분석</h2>
-      <div class="empty">아직 분석할 기록이 없어요.<br>운동을 기록하면 부위별 볼륨·주간 추이·3대 1RM이 여기에 쌓여요. 💪</div>
+      <div class="empty"><div class="empty-ico">📊</div>아직 분석할 기록이 없어요.<br>운동을 기록하면 부위별 볼륨·주간 추이·3대 1RM이 여기에 쌓여요. 💪</div>
       <button class="btn" onclick="setTab('workout')">운동 기록하러 가기</button></div>`;
   }
 
@@ -647,7 +662,7 @@ function viewMe(){
     </div></div>`;
   // 최근 신체 정보
   html+=`<div class="card"><h2>🧍 최근 신체 정보 ${last?`<span class="tag">${last.date}</span>`:''}</h2>`;
-  if(!last)html+=`<div class="empty">투데이의 체중 카드에서 측정값을 기록해보세요.</div>`;
+  if(!last)html+=`<div class="empty"><div class="empty-ico">🧍</div>투데이의 체중 카드에서 측정값을 기록해보세요.</div>`;
   else html+=`<div class="grid3">
     <div class="metric"><div class="v">${last.weight??'—'}<small>${last.weight!=null?'kg':''}</small></div><div class="l">체중</div></div>
     <div class="metric"><div class="v">${last.muscle??'—'}<small>${last.muscle!=null?'kg':''}</small></div><div class="l">골격근량</div></div>
@@ -753,7 +768,7 @@ function viewWorkout(){
     html+=`<button class="btn mb8" onclick="startSession()">▶ 운동 시작</button>
       <div class="muted" style="font-size:12px;margin-bottom:10px;text-align:center">운동 시작을 누르면 시간이 측정되고 신기록이 표시돼요.</div>`;
   }
-  if(!list.length)html+=`<div class="empty">아직 기록이 없어요.<br>아래에서 운동을 추가해보세요.</div>`;
+  if(!list.length)html+=`<div class="empty"><div class="empty-ico">🏋️</div>아직 기록이 없어요.<br>아래 <b>+ 운동 추가</b>로 오늘 첫 운동을 시작해보세요!</div>`;
   list.forEach((ex,i)=>{
     const best=exerciseMaxWeight(ex.name);
     const part=ex.part||partOf(ex.name);
@@ -809,7 +824,7 @@ function viewRoutines(hasCurrent){
   const rs=routines();
   let html=`<div class="card"><div class="spread mb8"><h2 style="margin:0">📋 내 루틴 ${rs.length?`<span class="tag">${rs.length}개</span>`:''}</h2></div>`;
   if(!rs.length){
-    html+=`<div class="empty">분할 루틴을 저장해두면<br>원클릭으로 오늘 운동에 담을 수 있어요.</div>`;
+    html+=`<div class="empty"><div class="empty-ico">📋</div>분할 루틴을 저장해두면<br>원클릭으로 오늘 운동에 담을 수 있어요.</div>`;
   }else{
     rs.forEach(r=>{
       const parts=[...new Set(r.items.map(it=>it.part||partOf(it.name)))];
@@ -973,7 +988,9 @@ function toggleSetDone(i,j){const set=DB.workouts[cur][i].sets[j];const nowDone=
   if(nowDone && DB.settings.autoRest!==false)startRest(restDefault());}
 function delSet(i,j){DB.workouts[cur][i].sets.splice(j,1);
   if(!DB.workouts[cur][i].sets.length)DB.workouts[cur][i].sets.push({weight:'',reps:''});save();renderAll();}
-function delEx(i){DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
+function delEx(i){const ex=DB.workouts[cur][i];
+  if(ex&&ex.sets.length>1&&!confirm((ex.name||'이 운동')+' 종목을 삭제할까요?'))return;
+  DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
 function setVal(i,j,f,v){DB.workouts[cur][i].sets[j][f]=v;save();
   // PR 토스트는 활성 세션의 세트일 때만(과거 기록 수정 시 오발화 방지)
   if(f==='weight' && isActiveSet(i,j)){const name=DB.workouts[cur][i].name;const w=+v||0;
@@ -1098,7 +1115,7 @@ function viewMeal(){
   const kcal=list.reduce((s,x)=>s+(+x.kcal||0),0);
   const prot=list.reduce((s,x)=>s+(+x.protein||0),0);
   let html=`<div class="card"><h2>🍱 식단 ${list.length?`<span class="tag">${kcal}kcal · 단백 ${prot}g</span>`:''}</h2>`;
-  if(!list.length)html+=`<div class="empty">먹은 걸 기록해보세요.<br>칼로리는 몰라도 메모만 남겨도 충분해요.</div>`;
+  if(!list.length)html+=`<div class="empty"><div class="empty-ico">🍱</div>먹은 걸 기록해보세요.<br>칼로리는 몰라도 메모만 남겨도 충분해요.</div>`;
   MEALTYPES.forEach(t=>{
     const items=list.map((x,idx)=>({x,idx})).filter(o=>o.x.type===t);
     if(!items.length)return;
@@ -1132,7 +1149,7 @@ function addMeal(){const memo=document.getElementById('mealMemo').value.trim();
   const kcal=document.getElementById('mealKcal').value;const protein=document.getElementById('mealProt').value;
   if(!memo&&!kcal){toast('메모나 칼로리를 입력해주세요');return;}
   if(!DB.meals[cur])DB.meals[cur]=[];
-  DB.meals[cur].push({type:curMT,memo,kcal,protein});save();renderAll();toast('기록했어요');
+  DB.meals[cur].push({type:curMT,memo,kcal,protein});save();renderAll();toast(praise());
 }
 function delMeal(i){DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
 
@@ -1187,7 +1204,7 @@ function viewBody(){
   const arr=[...DB.body].sort((a,b)=>a.date<b.date?-1:1);
   const last=arr[arr.length-1],prev=arr[arr.length-2];
   let html=`<div class="card"><h2>📈 현재 상태 ${last?`<span class="tag">${last.date}</span>`:''}</h2>`;
-  if(!last)html+=`<div class="empty">측정값을 기록하면<br>변화 그래프가 나타나요.</div>`;
+  if(!last)html+=`<div class="empty"><div class="empty-ico">📈</div>측정값을 기록하면<br>변화 그래프가 나타나요.</div>`;
   else{
     html+=`<div class="grid3">
       ${metricBox('체중',last.weight,prev&&prev.weight,'kg',true)}
@@ -1240,7 +1257,7 @@ function addBody(){
   const ex=DB.body.find(b=>b.date===date);
   if(ex){if(weight)ex.weight=weight;if(muscle)ex.muscle=muscle;if(fat)ex.fat=fat;}
   else DB.body.push({date,weight,muscle,fat});
-  save();renderAll();toast('저장했어요 💪');
+  save();renderAll();toast(praise());
 }
 function delBody(i){DB.body.splice(i,1);save();renderAll();}
 function drawChart(){
@@ -1330,6 +1347,10 @@ function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 let toastT;
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1800);}
+/* 저장 피드백용 격려 문구 로테이션. 호출할 때마다 다음 문구로 순환. */
+const PRAISE=['기록했어요 💪','잘하고 있어요 🔥','오늘도 한 걸음 👍','꾸준함이 이겨요 🙌','기록 완료! 👏'];
+let praiseIdx=0;
+function praise(){const m=PRAISE[praiseIdx%PRAISE.length];praiseIdx++;return m;}
 function openSheet(html){document.getElementById('sheet').innerHTML=html;
   document.getElementById('sheetBg').classList.add('show');
   requestAnimationFrame(()=>document.getElementById('sheet').classList.add('show'));}
