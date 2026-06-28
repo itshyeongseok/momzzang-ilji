@@ -852,6 +852,7 @@ function viewMe(){
     <label class="btn sec mt8" style="display:block;text-align:center">⬆ 백업 파일 불러오기
       <input type="file" accept="application/json" style="display:none" onchange="importData(this)"></label>
     <button class="btn sec mt8" onclick="openRestPicker()">⏱ 휴식 타이머 설정</button>
+    <button class="btn sec mt8" onclick="refreshApp()">🔄 앱 새로고침(업데이트)</button>
     <div class="divider"></div>
     <button class="btn danger" onclick="resetData()">전체 기록 삭제</button>
     <div class="muted" style="text-align:center;font-size:11px;margin-top:12px">BULCUP(벌컵) · 만든 사람: 고형석 💪</div></div>`;
@@ -1516,7 +1517,7 @@ function viewMeal(){
       const ph=x.photo?`<img class="thumb" data-photo="${esc(x.photo.id)}" ${x.photo.path?`data-path="${esc(x.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(x.photo.id)}','${esc(x.photo.path||'')}')" alt="식단 사진">`:'';
       html+=`<div class="ex" style="margin-bottom:7px"><div class="spread"><div style="flex:1">
         <div style="font-weight:600">${esc(x.memo||'(메모 없음)')}</div>
-        <div class="muted" style="font-size:12px;margin-top:2px">${x.kcal?x.kcal+'kcal':''}${x.protein?' · 단백 '+x.protein+'g':''}</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${x.at?'🕘 '+esc(x.at):''}${x.at&&(x.kcal||x.protein)?' · ':''}${x.kcal?x.kcal+'kcal':''}${x.protein?' · 단백 '+x.protein+'g':''}</div>
         </div>${ph}<button class="x" onclick="delMeal(${idx})">✕</button></div></div>`;
     });
     html+=`</div>`;
@@ -1535,7 +1536,7 @@ function viewMeal(){
       <div><label class="fld">칼로리 (선택)</label><input type="number" inputmode="numeric" id="mealKcal" placeholder="kcal"></div>
       <div><label class="fld">단백질 (선택)</label><input type="number" inputmode="numeric" id="mealProt" placeholder="g"></div>
     </div>
-    <input type="file" id="mealPhoto" accept="image/*" capture="environment" style="display:none" onchange="pickMealPhoto(this)">
+    <input type="file" id="mealPhoto" accept="image/*" style="display:none" onchange="pickMealPhoto(this)">
     <div class="row mt8" style="align-items:center;gap:8px">
       <button class="btn sec sm" onclick="document.getElementById('mealPhoto').click()">📷 사진 첨부</button>
       <span id="mealPhotoName" class="muted" style="font-size:12px">${mealPhotoPend?'사진 1장 선택됨':''}</span>
@@ -1557,14 +1558,16 @@ async function addMeal(){const memo=document.getElementById('mealMemo').value.tr
   if(mealPhotoPend){try{photo=await savePhoto('meal',cur,mealPhotoPend);}catch(e){toast('사진 처리 실패');}}
   mealPhotoPend=null;
   if(!DB.meals[cur])DB.meals[cur]=[];
-  DB.meals[cur].push({type:curMT,memo,kcal,protein,photo});save();renderAll();toast(praise());
+  DB.meals[cur].push({type:curMT,memo,kcal,protein,photo,at:nowHM()});save();renderAll();toast(praise());
 }
 // 표준식 프리셋 원탭 추가: 현재 선택된 끼니(curMT)로 메모·kcal·protein 자동 입력.
 function addPreset(i){const p=MEAL_PRESETS[i];if(!p)return;
   if(!DB.meals[cur])DB.meals[cur]=[];
-  DB.meals[cur].push({type:curMT,memo:p.memo,kcal:String(p.kcal),protein:String(p.protein),photo:null});
+  DB.meals[cur].push({type:curMT,memo:p.memo,kcal:String(p.kcal),protein:String(p.protein),photo:null,at:nowHM()});
   save();renderAll();toast(praise());
 }
+// 식사 기록 시각(현재 'HH:MM'). 식사 타이밍 분석에 사용.
+function nowHM(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
 function delMeal(i){const m=DB.meals[cur][i];if(m&&m.photo)idbDel(m.photo.id).catch(()=>{});
   DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
 
@@ -1640,7 +1643,7 @@ function viewBody(){
       <div><label class="fld">골격근(kg)</label><input type="number" inputmode="decimal" id="bMuscle" placeholder="0"></div>
       <div><label class="fld">체지방(%)</label><input type="number" inputmode="decimal" id="bFat" placeholder="0"></div>
     </div>
-    <input type="file" id="bodyPhoto" accept="image/*" capture="environment" style="display:none" onchange="pickBodyPhoto(this)">
+    <input type="file" id="bodyPhoto" accept="image/*" style="display:none" onchange="pickBodyPhoto(this)">
     <div class="row mt8" style="align-items:center;gap:8px">
       <button class="btn sec sm" onclick="document.getElementById('bodyPhoto').click()">📷 인바디 사진</button>
       <span id="bodyPhotoName" class="muted" style="font-size:12px">${bodyPhotoPend?'사진 1장 선택됨':''}</span>
@@ -1769,6 +1772,11 @@ function importData(input){const f=input.files[0];if(!f)return;
   }catch(e){toast('올바른 백업 파일이 아니에요');}};r.readAsText(f);}
 function resetData(){if(!confirm('정말 모든 기록을 삭제할까요? 되돌릴 수 없어요.'))return;
   DB=structuredClone(DEFAULT);save();stopElapsed();closeSheet();renderAll();toast('초기화했어요');}
+// 설치된 PWA를 최신 버전으로 갱신. 서비스워커가 있으면 업데이트 후 새로고침.
+function refreshApp(){toast('최신 버전을 불러오는 중…');
+  const reload=()=>location.reload();
+  if(navigator.serviceWorker){navigator.serviceWorker.getRegistration().then(r=>r&&r.update()).catch(()=>{}).then(reload);}
+  else reload();}
 
 /* ============ 공통 UI ============ */
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
