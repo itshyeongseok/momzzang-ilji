@@ -268,6 +268,70 @@ t('식단 추가/삭제 회귀',()=>{
   assert(!DB().meals['2026-06-27'],'삭제 후 빈 날짜 정리');
 });
 
+/* ========== 신규(QoL): 식단 먹은 시각 자동 기록 ========== */
+t('addMeal 시 먹은 시각(at) 자동 기록(HH:MM)',()=>{
+  reset();ev("curMT='점심';");
+  ctx.document.getElementById('mealMemo').value='닭가슴살';
+  ctx.document.getElementById('mealKcal').value='';
+  ctx.document.getElementById('mealProt').value='';
+  ev('addMeal()');
+  const m=DB().meals['2026-06-27'][0];
+  assert(/^\d{2}:\d{2}$/.test(m.at),'at은 HH:MM 형식: '+m.at);
+});
+
+t('addPreset(프리셋) 추가 시에도 at 기록',()=>{
+  reset();ev("curMT='아침';");
+  ev('addPreset(0)');
+  const m=DB().meals['2026-06-27'][0];
+  assert(/^\d{2}:\d{2}$/.test(m.at),'프리셋도 at 기록: '+m.at);
+});
+
+t('옛 식단(at 없음) 호환 — 렌더 무에러, 시각 미표시',()=>{
+  reset();
+  ev("DB.meals['2026-06-27']=[{type:'점심',memo:'옛기록',kcal:'',protein:''}];save();");
+  const m=DB().meals['2026-06-27'][0];
+  assert.strictEqual(m.at,undefined,'옛 데이터엔 at 없음');
+  const v=ev('viewMeal()');
+  assert(v.includes('옛기록'),'옛 기록 렌더됨');
+  assert(!v.includes('🕘'),'at 없으면 시각 아이콘 미표시');
+});
+
+t('at 있는 식단은 목록에 시각(🕘 HH:MM) 표시',()=>{
+  reset();
+  ev("DB.meals['2026-06-27']=[{type:'점심',memo:'밥',kcal:'',protein:'',at:'13:20'}];save();");
+  const v=ev('viewMeal()');
+  assert(v.includes('🕘 13:20'),'시각 표시');
+});
+
+/* ========== 신규(QoL): 사진 input에 capture 속성 제거(갤러리/구글포토 허용) ========== */
+t('mealPhoto/bodyPhoto input에 capture 속성 없음',()=>{
+  reset();
+  const vm_=ev("viewMeal()");
+  assert(vm_.includes('id="mealPhoto"'),'식단 입력 존재');
+  assert(!/id="mealPhoto"[^>]*capture/.test(vm_),'식단 입력에 capture 없음');
+  const vb=ev("viewBody()");
+  assert(vb.includes('id="bodyPhoto"'),'신체 입력 존재');
+  assert(!/id="bodyPhoto"[^>]*capture/.test(vb),'신체 입력에 capture 없음');
+});
+
+/* ========== 신규(QoL): 인앱 새로고침 버튼 ========== */
+t('프로필(me) 탭에 앱 새로고침 버튼 렌더',()=>{
+  reset();ev("setTab('me')");
+  const v=ctx.document.getElementById('view').innerHTML;
+  assert(v.includes('앱 새로고침'),'새로고침 버튼 라벨');
+  assert(v.includes('refreshApp()'),'refreshApp 핸들러');
+});
+
+t('refreshApp: 서비스워커 없으면 reload 호출(예외 없음)',()=>{
+  reset();
+  let reloaded=0;const sw=ctx.navigator.serviceWorker;
+  ctx.navigator.serviceWorker=undefined;
+  const oldReload=ctx.location.reload;ctx.location.reload=()=>{reloaded++;};
+  ev('refreshApp()');
+  ctx.navigator.serviceWorker=sw;ctx.location.reload=oldReload;
+  assert.strictEqual(reloaded,1,'reload 1회');
+});
+
 /* ========== 습관 ========== */
 t('습관 체크 토글 / 숫자 스텝',()=>{
   reset();
