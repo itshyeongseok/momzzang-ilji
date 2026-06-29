@@ -2076,6 +2076,34 @@ t('백업 호환: 플래그 없는 옛 JSON load 후 함수 정상',()=>{
   assert.strictEqual(ev("exerciseMaxWeight('어시스트 풀업')"),40,'옛 백업 보조 최저 폴백');
 });
 
+/* ========== v1 비주얼 리프레시: 회귀(로직 무변경) + ripple 안전성 ========== */
+t('ripple 위임이 등록돼도 핵심 흐름(quickEx/세트완료/세션) 정상',()=>{
+  // ripple은 pointerdown 위임 1개(순수 시각). 등록은 스크립트 로드시 이미 실행됨(예외 없었음).
+  // 그 이후에도 onclick 경로의 핵심 동작이 막히지 않는지 단언.
+  reset();ev("startSession();quickEx('벤치프레스');");clearSpies();
+  ev('toggleSetDone(0,0)');
+  assert.strictEqual(DB().workouts['2026-06-27'][0].sets[0].done,true,'세트 완료 토글 동작');
+  assert.strictEqual(restCallsLen(),1,'완료 시 휴식 시작(autoRest)');
+  assert(ev('isSessionActive()'),'세션 유지');
+  ev('endSession()');assert(!ev('isSessionActive()'),'세션 종료 동작');
+});
+
+t('reset 후 4탭 렌더가 새 토큰/모션 적용 후에도 무에러',()=>{
+  reset();ev("quickEx('스쿼트');");
+  ['home','workout','stats','me'].forEach(tab=>{
+    ev(`setTab('${tab}')`);
+    assert(ctx.document.getElementById('view').innerHTML.length>0,tab+' 렌더');
+  });
+});
+
+t('matchMedia 미정의 환경(헤드리스)에서 스크립트 로드 시 ripple 가드로 예외 없음',()=>{
+  // 본 테스트 vm 컨텍스트엔 matchMedia가 없음 → 여기까지 도달했다는 것 자체가 가드 통과 증거.
+  assert.strictEqual(typeof ctx.matchMedia,'undefined','테스트 환경에 matchMedia 없음');
+  // 핵심 함수들이 여전히 정의돼 있음(스크립트가 끝까지 평가됨).
+  assert.strictEqual(typeof ev('renderAll'),'function');
+  assert.strictEqual(typeof ev('setTab'),'function');
+});
+
 console.log('\n'+pass+' passed (sync)');
 
 /* ========== 비동기(사진 흐름): IndexedDB·압축·업로드 가드 ========== */
