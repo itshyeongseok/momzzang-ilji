@@ -667,31 +667,37 @@ function saveTodayWeight(){
   save();renderAll();toast('오늘 체중을 기록했어요 💪');
 }
 
-/* 오늘 수면 컴팩트 카드(투데이). 총수면 시간만 1초 입력. 렘/깊은잠/이미지는 프로필 수면 섹션. */
+/* 오늘 수면 카드(투데이). 갤럭시 수면 분석 이미지 + 메모만 바로 기록. 숫자 입력 없음. */
 function viewTodaySleep(){
   const rec=DB.sleep.find(s=>s.date===cur);
-  const has=rec&&rec.hours!=null;
+  const has=rec&&rec.photo;
+  const ph=has?`<img class="thumb" data-photo="${esc(rec.photo.id)}" ${rec.photo.path?`data-path="${esc(rec.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(rec.photo.id)}','${esc(rec.photo.path||'')}')" alt="수면 분석 이미지">`:'';
   return `<div class="card"><h2>😴 오늘 수면 ${has?`<span class="tag">기록됨</span>`:''}</h2>
-    <div class="row" style="gap:8px;align-items:flex-end">
-      <div style="flex:1"><input type="number" inputmode="decimal" id="todaySl" placeholder="${has?rec.hours:'오늘 잔 시간 (h)'}" value="${has?rec.hours:''}"></div>
-      <button class="btn" style="width:auto;white-space:nowrap" onclick="saveTodaySleep()">${has?'수정':'저장'}</button>
+    <input type="file" id="todaySlPhoto" accept="image/*" style="display:none" onchange="pickTodaySleepPhoto(this)">
+    <div class="row" style="gap:8px;align-items:center">
+      ${ph}
+      <button class="btn sec sm" style="white-space:nowrap" onclick="document.getElementById('todaySlPhoto').click()">📷 ${has?'사진 변경':'수면 분석 사진'}</button>
+      <span id="todaySlPhotoName" class="muted" style="font-size:12px">${todaySleepPhotoPend?'사진 1장 선택됨':''}</span>
     </div>
-    <div class="muted" style="font-size:12px;margin-top:8px">${has?`오늘 <b style="color:var(--text)">${rec.hours}h</b> · 렘/깊은잠은 아래 '수면' 섹션에서 남겨요.`:'숫자만 입력하면 오늘 수면으로 기록돼요.'}</div>
-    <div style="text-align:center;margin-top:8px"><span class="muted" style="font-size:13px;text-decoration:underline;cursor:pointer" onclick="goSleepSection()">수면 상세 기록 →</span></div>
+    <label class="fld mt8">메모</label><input type="text" id="todaySlMemo" placeholder="예: 새벽에 한 번 깸" value="${has&&rec.memo?esc(rec.memo):''}">
+    <button class="btn mt8" onclick="saveTodaySleep()">${has?'수정 저장':'저장'}</button>
+    <div class="muted" style="font-size:12px;margin-top:8px">갤럭시 수면 분석 캡처를 올리면 오늘 수면으로 기록돼요.</div>
   </div>`;
 }
-function saveTodaySleep(){
-  const v=parseFloat(document.getElementById('todaySl').value);
-  if(!v||v<=0){toast('수면 시간을 입력해주세요');return;}
+let todaySleepPhotoPend=null;
+function pickTodaySleepPhoto(input){const f=input.files&&input.files[0];todaySleepPhotoPend=f||null;
+  const lbl=document.getElementById('todaySlPhotoName');if(lbl)lbl.textContent=f?'사진 1장 선택됨':'';}
+async function saveTodaySleep(){
+  const memo=(document.getElementById('todaySlMemo').value||'').trim()||null;
+  if(!todaySleepPhotoPend&&memo==null){toast('사진이나 메모를 입력해주세요');return;}
+  let photo=null;
+  if(todaySleepPhotoPend){try{photo=await savePhoto('sleep',cur,todaySleepPhotoPend);}catch(e){toast('사진 처리 실패');}}
+  todaySleepPhotoPend=null;
   const ex=DB.sleep.find(s=>s.date===cur);
-  if(ex)ex.hours=v;
-  else DB.sleep.push({date:cur,hours:v,rem:null,deep:null,memo:null,photo:null});
+  if(ex){if(memo!=null)ex.memo=memo;
+    if(photo){if(ex.photo)idbDel(ex.photo.id).catch(()=>{});ex.photo=photo;}}
+  else DB.sleep.push({date:cur,memo,photo});
   save();renderAll();toast('오늘 수면을 기록했어요 😴');
-}
-/* 프로필 탭의 수면 섹션으로 이동(재렌더 후 스크롤). */
-function goSleepSection(){
-  setTab('me');
-  setTimeout(()=>{const el=document.getElementById('sleepSection');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},60);
 }
 
 /* 데이터가 전혀 없는 첫 진입인지(운동/식단/습관/신체 모두 비어있음). 가벼운 온보딩 안내용. */
@@ -1742,82 +1748,23 @@ function delBody(i){const b=DB.body[i];if(b&&b.photo)idbDel(b.photo.id).catch(()
   DB.body.splice(i,1);save();renderAll();}
 
 /* ============ 수면(프로필 전용 섹션) ============ */
-/* 최근 days일(cur 기준) 중 field가 입력된 날만 평균. 없으면 null. */
-function sleepAvg(field,days){
-  const start=new Date(cur+'T00:00');start.setDate(start.getDate()-(days-1));
-  const from=ymd(start);
-  const vals=DB.sleep.filter(s=>s.date>=from&&s.date<=cur&&s[field]!=null).map(s=>+s[field]);
-  if(!vals.length)return null;
-  return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10;
-}
+/* 기록 목록만 표시(날짜+이미지 썸네일+메모, 삭제). 입력은 투데이 카드에서. */
 function viewSleep(){
   const arr=[...DB.sleep].sort((a,b)=>a.date<b.date?-1:1);
   const has=arr.length>0;
-  let html=`<div class="card" id="sleepSection"><h2>😴 최근 수면 ${has?`<span class="tag">최근 7일 평균</span>`:''}</h2>`;
-  if(!has)html+=`<div class="empty"><div class="empty-ico">😴</div>수면 시간을 기록하면<br>회복 추세가 나타나요.</div>`;
+  let html=`<div class="card" id="sleepSection"><h2>😴 수면 기록</h2>`;
+  if(!has)html+=`<div class="empty"><div class="empty-ico">😴</div>오늘 탭에서 수면 분석 사진을<br>올리면 여기에 모여요.</div>`;
   else{
-    const av=v=>v==null?'—':v;
-    html+=`<div class="grid3">
-      <div class="metric"><div class="v">${av(sleepAvg('hours',7))}<small>${sleepAvg('hours',7)!=null?'h':''}</small></div><div class="l">총수면</div></div>
-      <div class="metric"><div class="v">${av(sleepAvg('rem',7))}<small>${sleepAvg('rem',7)!=null?'h':''}</small></div><div class="l">렘수면</div></div>
-      <div class="metric"><div class="v">${av(sleepAvg('deep',7))}<small>${sleepAvg('deep',7)!=null?'h':''}</small></div><div class="l">깊은잠</div></div>
-    </div>`;
-  }
-  html+=`</div>`;
-  // 입력 카드
-  html+=`<div class="card"><h2>수면 기록</h2>
-    <label class="fld">날짜</label><input type="date" id="slDate" value="${cur}">
-    <div class="grid3 mt8">
-      <div><label class="fld">총수면(h)</label><input type="number" inputmode="decimal" id="slHours" placeholder="0"></div>
-      <div><label class="fld">렘(h)</label><input type="number" inputmode="decimal" id="slRem" placeholder="0"></div>
-      <div><label class="fld">깊은잠(h)</label><input type="number" inputmode="decimal" id="slDeep" placeholder="0"></div>
-    </div>
-    <label class="fld mt8">메모</label><input type="text" id="slMemo" placeholder="예: 새벽에 한 번 깸">
-    <input type="file" id="sleepPhoto" accept="image/*" style="display:none" onchange="pickSleepPhoto(this)">
-    <div class="row mt8" style="align-items:center;gap:8px">
-      <button class="btn sec sm" onclick="document.getElementById('sleepPhoto').click()">📷 수면 분석 이미지</button>
-      <span id="sleepPhotoName" class="muted" style="font-size:12px">${sleepPhotoPend?'사진 1장 선택됨':''}</span>
-    </div>
-    <button class="btn mt8" onclick="addSleep()">+ 저장</button>
-    <div class="muted" style="font-size:11px;margin-top:8px">수면은 여기서 따로 관리해요(습관 목록엔 없음).</div>
-  </div>`;
-  // 목록
-  if(has){
-    html+=`<div class="card"><h2>수면 기록 목록</h2>`;
     [...arr].reverse().forEach(r=>{
       const realIdx=DB.sleep.indexOf(r);
-      const parts=[];
-      if(r.hours!=null)parts.push('총수면 '+r.hours+'h');
-      if(r.rem!=null)parts.push('렘 '+r.rem+'h');
-      if(r.deep!=null)parts.push('깊은 '+r.deep+'h');
       const ph=r.photo?`<img class="thumb" data-photo="${esc(r.photo.id)}" ${r.photo.path?`data-path="${esc(r.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(r.photo.id)}','${esc(r.photo.path||'')}')" alt="수면 분석 이미지">`:'';
       html+=`<div class="spread" style="padding:9px 0;border-bottom:1px solid var(--line)">
-        <div><b>${r.date}</b> <span class="muted" style="font-size:13px">${parts.join(' · ')}</span>${r.memo?`<div class="muted" style="font-size:12px">${esc(r.memo)}</div>`:''}</div>
+        <div><b>${r.date}</b>${r.memo?`<div class="muted" style="font-size:12px">${esc(r.memo)}</div>`:''}</div>
         ${ph}<button class="x" onclick="delSleep(${realIdx})">✕</button></div>`;
     });
-    html+=`</div>`;
   }
+  html+=`</div>`;
   return html;
-}
-let sleepPhotoPend=null;
-/* 수면 분석 이미지 선택(capture 없음 → 카메라/갤러리/구글포토 모두 선택 가능). */
-function pickSleepPhoto(input){const f=input.files&&input.files[0];sleepPhotoPend=f||null;
-  const lbl=document.getElementById('sleepPhotoName');if(lbl)lbl.textContent=f?'사진 1장 선택됨':'';}
-async function addSleep(){
-  const date=document.getElementById('slDate').value;
-  const hours=parseFloat(document.getElementById('slHours').value)||null;
-  const rem=parseFloat(document.getElementById('slRem').value)||null;
-  const deep=parseFloat(document.getElementById('slDeep').value)||null;
-  const memo=(document.getElementById('slMemo').value||'').trim()||null;
-  if(!date||(!hours&&!rem&&!deep&&!sleepPhotoPend)){toast('값이나 이미지를 하나 이상 입력해주세요');return;}
-  let photo=null;
-  if(sleepPhotoPend){try{photo=await savePhoto('sleep',date,sleepPhotoPend);}catch(e){toast('사진 처리 실패');}}
-  sleepPhotoPend=null;
-  const ex=DB.sleep.find(s=>s.date===date);
-  if(ex){if(hours)ex.hours=hours;if(rem)ex.rem=rem;if(deep)ex.deep=deep;if(memo)ex.memo=memo;
-    if(photo){if(ex.photo)idbDel(ex.photo.id).catch(()=>{});ex.photo=photo;}}
-  else DB.sleep.push({date,hours,rem,deep,memo,photo});
-  save();renderAll();toast('수면을 기록했어요 😴');
 }
 function delSleep(i){const s=DB.sleep[i];if(s&&s.photo)idbDel(s.photo.id).catch(()=>{});
   DB.sleep.splice(i,1);save();renderAll();}
