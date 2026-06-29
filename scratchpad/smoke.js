@@ -256,21 +256,23 @@ t('bigThree 3대 부분일치 집계',()=>{
   assert(be.oneRM>0,'벤치 부분일치');
 });
 
-/* ========== 식단 ========== */
-t('식단 추가/삭제 회귀',()=>{
-  reset();ev("curMT='점심';");
+/* ========== 식단(개편: 끼니 타입 제거 + 시간기준) ========== */
+t('식단 추가/삭제 회귀(type 없이 저장)',()=>{
+  reset();
   ctx.document.getElementById('mealMemo').value='닭가슴살';
   ctx.document.getElementById('mealKcal').value='300';
   ctx.document.getElementById('mealProt').value='40';
   ev('addMeal()');
-  assert.strictEqual(DB().meals['2026-06-27'][0].memo,'닭가슴살');
+  const m=DB().meals['2026-06-27'][0];
+  assert.strictEqual(m.memo,'닭가슴살');
+  assert.strictEqual(m.type,undefined,'끼니 type 제거됨(미저장)');
   ev('delMeal(0)');
   assert(!DB().meals['2026-06-27'],'삭제 후 빈 날짜 정리');
 });
 
-/* ========== 신규(QoL): 식단 먹은 시각 자동 기록 ========== */
+/* ========== 식단 먹은 시각 자동 기록 ========== */
 t('addMeal 시 먹은 시각(at) 자동 기록(HH:MM)',()=>{
-  reset();ev("curMT='점심';");
+  reset();
   ctx.document.getElementById('mealMemo').value='닭가슴살';
   ctx.document.getElementById('mealKcal').value='';
   ctx.document.getElementById('mealProt').value='';
@@ -280,27 +282,47 @@ t('addMeal 시 먹은 시각(at) 자동 기록(HH:MM)',()=>{
 });
 
 t('addPreset(프리셋) 추가 시에도 at 기록',()=>{
-  reset();ev("curMT='아침';");
+  reset();
   ev('addPreset(0)');
   const m=DB().meals['2026-06-27'][0];
   assert(/^\d{2}:\d{2}$/.test(m.at),'프리셋도 at 기록: '+m.at);
 });
 
-t('옛 식단(at 없음) 호환 — 렌더 무에러, 시각 미표시',()=>{
+t('옛 식단(at 없음·옛 type 포함) 호환 — 렌더 무에러',()=>{
   reset();
   ev("DB.meals['2026-06-27']=[{type:'점심',memo:'옛기록',kcal:'',protein:''}];save();");
   const m=DB().meals['2026-06-27'][0];
   assert.strictEqual(m.at,undefined,'옛 데이터엔 at 없음');
   const v=ev('viewMeal()');
-  assert(v.includes('옛기록'),'옛 기록 렌더됨');
-  assert(!v.includes('🕘'),'at 없으면 시각 아이콘 미표시');
+  assert(v.includes('옛기록'),'옛 기록(옛 type 포함) 렌더됨(무에러)');
 });
 
-t('at 있는 식단은 목록에 시각(🕘 HH:MM) 표시',()=>{
+t('at 있는 식단은 목록에 시각 입력칸(value=HH:MM)으로 표시',()=>{
   reset();
-  ev("DB.meals['2026-06-27']=[{type:'점심',memo:'밥',kcal:'',protein:'',at:'13:20'}];save();");
+  ev("DB.meals['2026-06-27']=[{memo:'밥',kcal:'',protein:'',at:'13:20'}];save();");
   const v=ev('viewMeal()');
-  assert(v.includes('🕘 13:20'),'시각 표시');
+  assert(v.includes('type="time"'),'시각 수정용 time 입력칸');
+  assert(v.includes('value="13:20"'),'현재 시각 value 반영');
+  assert(v.includes('setMealAt(0,'),'시각 수정 핸들러');
+});
+
+t('식단은 시간(at) 순으로 정렬되어 렌더(at 없는 옛 기록은 뒤)',()=>{
+  reset();
+  ev("DB.meals['2026-06-27']=[{memo:'저녁밥',at:'19:00'},{memo:'아침밥',at:'07:30'},{memo:'옛것'}];save();");
+  const v=ev('viewMeal()');
+  const iEarly=v.indexOf('아침밥'),iLate=v.indexOf('저녁밥'),iOld=v.indexOf('옛것');
+  assert(iEarly>-1&&iLate>-1&&iOld>-1,'모두 렌더됨');
+  assert(iEarly<iLate,'07:30이 19:00보다 앞');
+  assert(iLate<iOld,'at 없는 옛 기록은 맨 뒤');
+});
+
+t('setMealAt: 식단 항목 시각 수정 저장(빈 값은 무시)',()=>{
+  reset();
+  ev("DB.meals['2026-06-27']=[{memo:'밥',at:'13:20'}];save();");
+  ev("setMealAt(0,'09:05')");
+  assert.strictEqual(DB().meals['2026-06-27'][0].at,'09:05','시각 수정 반영');
+  ev("setMealAt(0,'')");
+  assert.strictEqual(DB().meals['2026-06-27'][0].at,'09:05','빈 값은 무시');
 });
 
 /* ========== 신규(QoL): 사진 input에 capture 속성 제거(갤러리/구글포토 허용) ========== */
@@ -1065,7 +1087,7 @@ t('praise(): 호출마다 다음 문구로 순환하고 한 바퀴 후 처음으
 });
 
 t('식단 추가 시 격려 토스트(로테이션 문구)가 뜬다',()=>{
-  reset();ev("curMT='점심';");
+  reset();
   ctx.document.getElementById('mealMemo').value='닭가슴살';
   ctx.document.getElementById('mealKcal').value='';
   ctx.document.getElementById('mealProt').value='';
@@ -1578,9 +1600,9 @@ t('endSession → showSessionSummary가 인사이트 시트를 연다(무에러)
 });
 
 /* ========== 신규(meal-presets): 고형석 표준식 빠른 추가 프리셋 ========== */
-t('MEAL_PRESETS 값 정확(오트밀 176/9, 쉐이크 216/28)',()=>{
+t('MEAL_PRESETS 값 정확(오트밀 176/9, 쉐이크 216/28, 바나나 105/1)',()=>{
   reset();
-  assert.strictEqual(ev('MEAL_PRESETS.length'),2,'프리셋 2개');
+  assert.strictEqual(ev('MEAL_PRESETS.length'),3,'프리셋 3개');
   const oat=ev("MEAL_PRESETS.find(p=>p.name==='오트밀')");
   assert.strictEqual(oat.kcal,176,'오트밀 176kcal');
   assert.strictEqual(oat.protein,9,'오트밀 단백 9g');
@@ -1589,30 +1611,36 @@ t('MEAL_PRESETS 값 정확(오트밀 176/9, 쉐이크 216/28)',()=>{
   assert.strictEqual(sh.kcal,216,'쉐이크 216kcal');
   assert.strictEqual(sh.protein,28,'쉐이크 단백 28g');
   assert(sh.memo.includes('파우더35g'),'쉐이크 메모');
+  const ba=ev("MEAL_PRESETS.find(p=>p.name==='바나나')");
+  assert.strictEqual(ba.kcal,105,'바나나 105kcal');
+  assert.strictEqual(ba.protein,1,'바나나 단백 1g');
+  assert.strictEqual(ba.memo,'바나나 1개','바나나 메모');
 });
 
-t('addPreset: 현재 끼니(curMT)로 올바른 식단 항목 생성',()=>{
-  reset();ev("curMT='아침';");
+t('addPreset: type 없이 올바른 식단 항목 생성(오트밀)',()=>{
+  reset();
   ev('addPreset(0)'); // 오트밀
   const m=DB().meals['2026-06-27'][0];
-  assert.strictEqual(m.type,'아침','끼니 type 반영');
+  assert.strictEqual(m.type,undefined,'끼니 type 제거됨');
   assert.strictEqual(m.memo,ev('MEAL_PRESETS[0].memo'),'메모 채움');
   assert.strictEqual(m.kcal,'176','kcal 채움(문자열)');
   assert.strictEqual(m.protein,'9','protein 채움(문자열)');
   assert.strictEqual(m.photo,null,'사진 없음');
+  assert(/^\d{2}:\d{2}$/.test(m.at),'현재 시각 자동 기록');
 });
 
-t('addPreset: 끼니 변경(curMT) 반영 + 쉐이크 값',()=>{
-  reset();ev("curMT='간식';");
-  ev('addPreset(1)'); // 쉐이크
+t('addPreset: 바나나 프리셋 값(105/1, 메모 "바나나 1개")',()=>{
+  reset();
+  const idx=ev("MEAL_PRESETS.findIndex(p=>p.name==='바나나')");
+  ev(`addPreset(${idx})`);
   const m=DB().meals['2026-06-27'][0];
-  assert.strictEqual(m.type,'간식','간식으로 type 반영');
-  assert.strictEqual(m.kcal,'216');
-  assert.strictEqual(m.protein,'28');
+  assert.strictEqual(m.memo,'바나나 1개');
+  assert.strictEqual(m.kcal,'105');
+  assert.strictEqual(m.protein,'1');
 });
 
 t('addPreset: 같은 날 누적 + 합계 반영(viewMeal)',()=>{
-  reset();ev("curMT='아침';addPreset(0);addPreset(1);");
+  reset();ev("addPreset(0);addPreset(1);");
   assert.strictEqual(DB().meals['2026-06-27'].length,2,'두 항목 누적');
   // 합계: 176+216=392 kcal, 9+28=37 g
   const v=ev('viewMeal()');
@@ -1620,13 +1648,21 @@ t('addPreset: 같은 날 누적 + 합계 반영(viewMeal)',()=>{
   assert(v.includes('단백 37g'),'합계 단백질');
 });
 
-t('식단 추가 카드에 프리셋 칩 렌더(오트밀/쉐이크)',()=>{
+t('식단 추가 카드에 프리셋 칩 렌더(오트밀/쉐이크/바나나)',()=>{
   reset();
   const v=ev('viewMeal()');
   assert(v.includes('🥣 오트밀'),'오트밀 칩');
   assert(v.includes('🥤 쉐이크'),'쉐이크 칩');
-  assert(v.includes('addPreset(0)')&&v.includes('addPreset(1)'),'프리셋 핸들러');
+  assert(v.includes('🍌 바나나'),'바나나 칩');
+  assert(v.includes('addPreset(0)')&&v.includes('addPreset(1)')&&v.includes('addPreset(2)'),'프리셋 핸들러');
   assert(v.includes('빠른 추가'),'빠른 추가 라벨');
+});
+
+t('식단 추가 카드에 끼니(아침/점심/저녁/간식) 칩이 없다',()=>{
+  reset();
+  const v=ev('viewMeal()');
+  assert(!v.includes('data-mt'),'끼니 선택 칩 제거됨');
+  assert(!v.includes('pickMT'),'pickMT 핸들러 제거됨');
 });
 
 /* ========== 신규(sleep PR-1): 수면 데이터 모델 + 습관 분리(멱등 마이그레이션) ========== */
@@ -1956,7 +1992,7 @@ async function at(name,fn){try{await fn();pass++;console.log('  ok -',name);}cat
   });
 
   await at('addMeal: 사진 첨부 시 meal.photo 메타가 레코드에 저장',async()=>{
-    reset();ev("curMT='점심';mealPhotoPend={size:600000,type:'image/jpeg'};");
+    reset();ev("mealPhotoPend={size:600000,type:'image/jpeg'};");
     elCache['mealMemo']=makeEl();elCache['mealMemo'].value='닭가슴살';
     elCache['mealKcal']=makeEl();elCache['mealKcal'].value='';
     elCache['mealProt']=makeEl();elCache['mealProt'].value='';
@@ -1970,7 +2006,7 @@ async function at(name,fn){try{await fn();pass++;console.log('  ok -',name);}cat
   });
 
   await at('addMeal: 사진만 있어도(메모·칼로리 없음) 기록됨',async()=>{
-    reset();ev("curMT='저녁';mealPhotoPend={size:500000,type:'image/jpeg'};");
+    reset();ev("mealPhotoPend={size:500000,type:'image/jpeg'};");
     elCache['mealMemo']=makeEl();elCache['mealMemo'].value='';
     elCache['mealKcal']=makeEl();elCache['mealKcal'].value='';
     elCache['mealProt']=makeEl();elCache['mealProt'].value='';
