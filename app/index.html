@@ -514,15 +514,21 @@ function viewPhoto(id,path){
 /* ============ 운동 마스터(부위별) ============ */
 const PARTS=['가슴','등','어깨','팔','하체','복근','유산소'];
 /* 시드: 부위별 대표 운동. 사용자 추가분(DB.exDB)과 병합해서 사용. */
+/* 시드 항목은 이름 문자열 또는 {name,assist?,cardio?} 객체.
+   assist=보조형(입력 무게=보조량, 낮을수록 성장), cardio=시간 기록형(볼륨/PR 제외). */
 const EX_SEED=[
-  ['가슴',['벤치프레스','인클라인벤치','덤벨프레스','체스트플라이','딥스','푸시업']],
-  ['등',['데드리프트','랫풀다운','바벨로우','시티드로우','풀업','티바로우']],
+  ['가슴',['벤치프레스','인클라인벤치','덤벨프레스','체스트플라이','딥스','푸시업',{name:'어시스트 딥스',assist:true}]],
+  ['등',['데드리프트','랫풀다운','바벨로우','시티드로우','풀업','티바로우',{name:'어시스트 풀업',assist:true}]],
   ['어깨',['오버헤드프레스','사이드 레터럴 레이즈','페이스풀','리어델트 플라이','아놀드 프레스']],
   ['팔',['바벨컬','덤벨컬','해머컬','케이블푸시다운','라잉 익스텐션','프리처컬']],
   ['하체',['스쿼트','레그프레스','레그 익스텐션','레그 컬','루마니안 데드리프트','런지','카프레이즈']],
   ['복근',['크런치','행잉 레그레이즈','플랭크','케이블 크런치']],
-  ['유산소',['러닝','사이클','로잉','인터벌']]
-].flatMap(([part,names])=>names.map(name=>({id:'ex_'+part+'_'+name,name,part,fav:false})));
+  ['유산소',['러닝','사이클','로잉','인터벌',{name:'천국의계단',cardio:true}]]
+].flatMap(([part,names])=>names.map(it=>{
+  const o=(typeof it==='string')?{name:it}:it;
+  return {id:'ex_'+part+'_'+o.name,name:o.name,part,fav:false,
+    ...(o.assist?{assist:true}:{}),...(o.cardio?{cardio:true}:{})};
+}));
 /* 시드 + 사용자 추가분 병합(이름 기준 사용자분 우선). */
 function allEx(){
   const map={};EX_SEED.forEach(e=>map[e.name]={...e});
@@ -531,6 +537,16 @@ function allEx(){
 }
 /* 운동 이름 → 부위. 마스터에 없으면 '기타'. 레거시 종목 폴백. */
 function partOf(name){const e=allEx().find(x=>x.name===name);return (e&&e.part)||'기타';}
+/* 종목 타입 플래그(마스터 기준 폴백). 플래그 없으면 false. */
+function exAssist(name){const e=allEx().find(x=>x.name===name);return !!(e&&e.assist);}
+function exCardio(name){const e=allEx().find(x=>x.name===name);return !!(e&&e.cardio);}
+/* 종목 종류 판정 → 'assist' | 'cardio' | 'normal'. 인스턴스 ex 객체를 주면 그 플래그 우선. */
+function exKind(name,ex){
+  if(ex&&typeof ex==='object'){if(ex.cardio)return 'cardio';if(ex.assist)return 'assist';}
+  if(exCardio(name))return 'cardio';
+  if(exAssist(name))return 'assist';
+  return 'normal';
+}
 /* 즐겨찾기 여부(사용자분 우선). */
 function isFav(name){const u=(DB.exDB||[]).find(e=>e.name===name);if(u&&u.fav!=null)return !!u.fav;
   const s=EX_SEED.find(e=>e.name===name);return !!(s&&s.fav);}
@@ -752,6 +768,7 @@ function partVolume(weeks){
   const totals={};PARTS.forEach(p=>totals[p]=0);totals['기타']=0;
   for(let i=0;i<weeks;i++){weekKeys(i).forEach(k=>{
     (DB.workouts[k]||[]).forEach(ex=>{
+      if(exKind(ex.name,ex)!=='normal')return; // 보조/유산소는 볼륨 제외
       const part=ex.part||partOf(ex.name);const key=(part in totals)?part:'기타';
       let v=0;(ex.sets||[]).forEach(s=>{v+=(+s.weight||0)*(+s.reps||0);});
       totals[key]+=v;
@@ -969,7 +986,7 @@ function cloudSignup(){
 function cloudLogout(){if(SYNC.logout)SYNC.logout();}
 
 /* ============ 운동일지 ============ */
-function workoutVolume(list){let v=0;(list||[]).forEach(e=>e.sets.forEach(s=>{v+=(+s.weight||0)*(+s.reps||0);}));return Math.round(v);}
+function workoutVolume(list){let v=0;(list||[]).forEach(e=>{if(exKind(e.name,e)!=='normal')return;e.sets.forEach(s=>{v+=(+s.weight||0)*(+s.reps||0);});});return Math.round(v);}
 
 /* ----- 운동 세션 (시작/종료 + 경과시간) -----
    설계: 운동/세트 데이터는 기존 DB.workouts[date] 그대로(백업 호환). 세션은 시간 메타만
@@ -1027,7 +1044,7 @@ function viewInsight(s){
   // 신기록
   if(sum.prHits.length){
     html+=`<div class="sum mt8" style="border-color:var(--warn)"><div class="k" style="color:var(--warn)">🎉 신기록 ${sum.prHits.length}개</div>
-      <div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--text-strong)">${sum.prHits.map(p=>esc(p.name)+' '+p.value+'kg').join(' · ')}</div></div>`;
+      <div style="margin-top:6px;font-size:13px;font-weight:700;color:var(--text-strong)">${sum.prHits.map(p=>esc(p.name)+' '+(p.assist?'보조 '+p.value+'kg↓':p.value+'kg')).join(' · ')}</div></div>`;
   }
 
   // 2) 평균 대비 비교(완료 세션 표본 있을 때만)
@@ -1063,6 +1080,15 @@ function viewInsight(s){
     html+=`<div class="muted" style="font-size:13px">기록된 세트가 없어요.</div>`;
   }
   html+=`</div>`;
+
+  // 3-b) 근력 외 활동(유산소 분·보조 운동) — 볼륨 지표엔 안 잡히지만 별도 표시
+  const extra=sessionExtraStats(s.id);
+  if(extra.cardioMin>0||extra.assist.length){
+    html+=`<div class="card ins-card"><h2 style="margin-top:0">🏃 근력 외 활동</h2>`;
+    if(extra.cardioMin>0)html+=`<div class="spread" style="padding:6px 0;font-size:13px"><span style="font-weight:700">유산소</span><span class="muted">${extra.cardioMin}분</span></div>`;
+    extra.assist.forEach(a=>{html+=`<div class="spread" style="padding:6px 0;font-size:13px"><span style="font-weight:700">${esc(a.name)} <span class="tag">🅰 보조</span></span><span class="muted">보조 ${a.w}kg (낮을수록 성장)</span></div>`;});
+    html+=`</div>`;
+  }
 
   // 4) 근육 피로도 맵(자체 SVG 인체도)
   html+=`<div class="card ins-card"><h2 style="margin-top:0">🧍 근육 피로도 맵</h2>
@@ -1115,21 +1141,40 @@ function viewWorkout(){
   }
   if(!list.length)html+=`<div class="empty"><div class="empty-ico">🏋️</div>아직 기록이 없어요.<br>아래 <b>+ 운동 추가</b>로 오늘 첫 운동을 시작해보세요!</div>`;
   list.forEach((ex,i)=>{
+    const kind=exKind(ex.name,ex);
     const best=exerciseMaxWeight(ex.name);
     const part=ex.part||partOf(ex.name);
-    html+=`<div class="ex"><div class="ex-head"><span class="name">${partBadge(part)}${esc(ex.name)}${best>0?` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆${best}kg</span>`:''}</span>
+    // best 배지: 일반=최고무게, assist=최저보조. cardio는 표기 없음.
+    let bestBadge='';
+    if(kind==='normal'&&best>0)bestBadge=` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆${best}kg</span>`;
+    else if(kind==='assist'&&best>0)bestBadge=` <span style="font-size:11px;font-weight:700;color:var(--warn)">🏆 보조 ${best}kg(최저)</span>`;
+    const kindChip=kind==='assist'?` <span class="tag" style="background:color-mix(in srgb,var(--part-${part}) 14%, white)">🅰 보조</span>`
+      :kind==='cardio'?` <span class="tag" style="background:color-mix(in srgb,var(--part-유산소) 14%, white)">🏃 유산소</span>`:'';
+    html+=`<div class="ex"><div class="ex-head"><span class="name">${partBadge(part)}${esc(ex.name)}${kindChip}${bestBadge}</span>
       <button class="btn sm sec" onclick="addSet(${i})">+ 세트</button>
-      <button class="x" onclick="delEx(${i})">✕</button></div>
-      <div class="setline"><div class="n"></div><div class="set-unit">무게(kg)</div><div class="set-unit">횟수</div><div class="set-unit">완료</div><div></div></div>`;
-    ex.sets.forEach((s,j)=>{
-      const pv=prevSetFor(ex.name,j);
-      html+=`<div class="setline${s.done?' set-done':''}"><div class="n">${j+1}</div>
-        <input type="number" inputmode="decimal" value="${s.weight??''}" placeholder="${pv?(pv.weight??0):'0'}" onchange="setVal(${i},${j},'weight',this.value)">
-        <input type="number" inputmode="numeric" value="${s.reps??''}" placeholder="${pv?(pv.reps??0):'0'}" onchange="setVal(${i},${j},'reps',this.value)">
-        <button class="set-check${s.done?' on':''}" onclick="toggleSetDone(${i},${j})" aria-label="세트 완료">✓</button>
-        <button class="x" onclick="delSet(${i},${j})">✕</button></div>`;
-      if(pv)html+=`<div class="set-ghost">지난 기록 ${pv.weight||0}kg × ${pv.reps||0}회</div>`;
-    });
+      <button class="x" onclick="delEx(${i})">✕</button></div>`;
+    if(kind==='cardio'){
+      html+=`<div class="setline"><div class="n"></div><div class="set-unit">시간(분)</div><div class="set-unit">완료</div><div></div></div>`;
+      ex.sets.forEach((s,j)=>{
+        html+=`<div class="setline${s.done?' set-done':''}" style="grid-template-columns:26px 1fr 36px auto"><div class="n">${j+1}</div>
+          <input type="number" inputmode="numeric" value="${s.min??''}" placeholder="0" onchange="setVal(${i},${j},'min',this.value)">
+          <button class="set-check${s.done?' on':''}" onclick="toggleSetDone(${i},${j})" aria-label="세트 완료">✓</button>
+          <button class="x" onclick="delSet(${i},${j})">✕</button></div>`;
+      });
+    }else{
+      const wLbl=kind==='assist'?'보조(kg)':'무게(kg)';
+      html+=`<div class="setline"><div class="n"></div><div class="set-unit">${wLbl}</div><div class="set-unit">횟수</div><div class="set-unit">완료</div><div></div></div>`;
+      ex.sets.forEach((s,j)=>{
+        const pv=prevSetFor(ex.name,j);
+        html+=`<div class="setline${s.done?' set-done':''}"><div class="n">${j+1}</div>
+          <input type="number" inputmode="decimal" value="${s.weight??''}" placeholder="${pv?(pv.weight??0):'0'}" onchange="setVal(${i},${j},'weight',this.value)">
+          <input type="number" inputmode="numeric" value="${s.reps??''}" placeholder="${pv?(pv.reps??0):'0'}" onchange="setVal(${i},${j},'reps',this.value)">
+          <button class="set-check${s.done?' on':''}" onclick="toggleSetDone(${i},${j})" aria-label="세트 완료">✓</button>
+          <button class="x" onclick="delSet(${i},${j})">✕</button></div>`;
+        if(kind==='assist'&&(+s.weight||0)>0)html+=`<div class="set-ghost">-${+s.weight}kg (보조)</div>`;
+        else if(pv)html+=`<div class="set-ghost">지난 기록 ${pv.weight||0}kg × ${pv.reps||0}회</div>`;
+      });
+    }
     html+=`</div>`;
   });
   html+=`</div>`;
@@ -1153,9 +1198,10 @@ function viewWorkout(){
   const prs=allPRs();
   if(prs.length){
     html+=`<div class="card"><h2>🏆 개인 최고기록 <span class="tag">${prs.length}종목</span></h2>`;
-    prs.forEach(p=>{html+=`<div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
+    prs.forEach(p=>{const valTxt=p.assist?`보조 ${p.weight}kg(최저)`:`${p.weight}kg`;
+      html+=`<div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line)">
       <span style="font-weight:600">${esc(p.name)}</span>
-      <span><b style="color:var(--warn)">${p.weight}kg</b> <span class="muted" style="font-size:12px">${p.reps?('× '+p.reps+'회 '):''}· ${p.date}</span></span></div>`;});
+      <span><b style="color:var(--warn)">${valTxt}</b> <span class="muted" style="font-size:12px">${p.reps?('× '+p.reps+'회 '):''}· ${p.date}</span></span></div>`;});
     html+=`</div>`;
   }
   return html;
@@ -1324,9 +1370,15 @@ function prevSetFor(name,idx){
 }
 function curSid(){return (isSessionActive()&&DB.settings.activeSessionDate===cur)?DB.settings.activeSessionId:undefined;}
 function quickEx(name,part){if(!DB.workouts[cur])DB.workouts[cur]=[];
-  DB.workouts[cur].push({name,part:part||partOf(name),sets:[{weight:'',reps:'',done:false,sid:curSid()}]});save();renderAll();}
-function addSet(i){const sets=DB.workouts[cur][i].sets;const last=sets[sets.length-1]||{};
-  sets.push({weight:last.weight||'',reps:last.reps||'',done:false,sid:curSid()});save();renderAll();}
+  const kind=exKind(name);
+  const firstSet=(kind==='cardio')?{min:'',done:false,sid:curSid()}:{weight:'',reps:'',done:false,sid:curSid()};
+  DB.workouts[cur].push({name,part:part||partOf(name),
+    ...(kind==='assist'?{assist:true}:{}),...(kind==='cardio'?{cardio:true}:{}),
+    sets:[firstSet]});save();renderAll();}
+function addSet(i){const ex=DB.workouts[cur][i];const sets=ex.sets;const last=sets[sets.length-1]||{};
+  if(exKind(ex.name,ex)==='cardio')sets.push({min:last.min||'',done:false,sid:curSid()});
+  else sets.push({weight:last.weight||'',reps:last.reps||'',done:false,sid:curSid()});
+  save();renderAll();}
 /* 번핏식: 세트 '완료 체크' 토글. 미완료→완료로 켤 때 자동휴식(autoRest) 시작
    완료 시 doneAt(타임스탬프) 기록 → 세션 누적볼륨 그래프용. 해제 시 제거. */
 function toggleSetDone(i,j){const set=DB.workouts[cur][i].sets[j];const nowDone=!set.done;
@@ -1339,16 +1391,37 @@ function delEx(i){const ex=DB.workouts[cur][i];
   DB.workouts[cur].splice(i,1);if(!DB.workouts[cur].length)delete DB.workouts[cur];save();renderAll();}
 function setVal(i,j,f,v){DB.workouts[cur][i].sets[j][f]=v;save();
   // PR 토스트는 활성 세션의 세트일 때만(과거 기록 수정 시 오발화 방지)
-  if(f==='weight' && isActiveSet(i,j)){const name=DB.workouts[cur][i].name;const w=+v||0;
-    if(w>0 && w>exerciseMaxWeight(name,{date:cur,i,j})){
-      toast('🏆 '+name+' 신기록 '+w+'kg!');if(navigator.vibrate)navigator.vibrate(120);}}
+  if(f==='weight' && isActiveSet(i,j)){const ex=DB.workouts[cur][i];const name=ex.name;const w=+v||0;
+    const kind=exKind(name,ex);
+    if(kind==='assist'){
+      const prevBest=exerciseMaxWeight(name,{date:cur,i,j}); // 기존 최저 보조량(없으면 0)
+      if(w>0 && prevBest>0 && w<prevBest){ // 기존 기록보다 낮춰야 신기록(첫 기록은 침묵)
+        toast('🏆 '+name+' 보조 줄였어요! '+w+'kg 💪');if(navigator.vibrate)navigator.vibrate(120);}
+    }else if(kind==='normal'){
+      if(w>0 && w>exerciseMaxWeight(name,{date:cur,i,j})){
+        toast('🏆 '+name+' 신기록 '+w+'kg!');if(navigator.vibrate)navigator.vibrate(120);}
+    }}
   document.querySelector('#view .card .tag')&&renderAll();}
 function copyWorkout(date){
-  DB.workouts[cur]=DB.workouts[date].map(e=>({name:e.name,part:e.part||partOf(e.name),sets:e.sets.map(s=>({weight:s.weight,reps:s.reps}))}));
+  DB.workouts[cur]=DB.workouts[date].map(e=>{
+    const kind=exKind(e.name,e);
+    return {name:e.name,part:e.part||partOf(e.name),
+      ...(kind==='assist'?{assist:true}:{}),...(kind==='cardio'?{cardio:true}:{}),
+      sets:e.sets.map(s=>kind==='cardio'?{min:s.min}:{weight:s.weight,reps:s.reps})};
+  });
   save();renderAll();toast('지난 운동을 불러왔어요');
 }
 /* 개인 최고기록: 저장된 운동 데이터에서 계산(별도 저장 없음) */
 function exerciseMaxWeight(name,skip){
+  const kind=exKind(name);
+  if(kind==='cardio')return 0; // 무게 개념 없음
+  if(kind==='assist'){ // 보조량 최솟값(>0)이 최고기록. 없으면 0.
+    let min=0;
+    for(const d in DB.workouts){DB.workouts[d].forEach((ex,i)=>{if(ex.name!==name)return;
+      ex.sets.forEach((s,j)=>{if(skip&&skip.date===d&&skip.i===i&&skip.j===j)return;
+        const w=+s.weight||0;if(w>0&&(min===0||w<min))min=w;});});}
+    return min;
+  }
   let max=0;
   for(const d in DB.workouts){DB.workouts[d].forEach((ex,i)=>{if(ex.name!==name)return;
     ex.sets.forEach((s,j)=>{if(skip&&skip.date===d&&skip.i===i&&skip.j===j)return;
@@ -1357,11 +1430,17 @@ function exerciseMaxWeight(name,skip){
 }
 function allPRs(){
   const best={};
-  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{ex.sets.forEach(s=>{
-    const w=+s.weight||0;if(w<=0)return;
-    if(!best[ex.name]||w>best[ex.name].weight)best[ex.name]={weight:w,reps:+s.reps||0,date:d};
-  });});}
-  return Object.entries(best).map(([name,v])=>({name,weight:v.weight,reps:v.reps,date:v.date}))
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    const kind=exKind(ex.name,ex);
+    if(kind==='cardio')return; // 유산소는 PR 목록 제외
+    ex.sets.forEach(s=>{
+      const w=+s.weight||0;if(w<=0)return;
+      const cur=best[ex.name];
+      // assist는 보조량 최솟값이 기록, 일반은 최댓값
+      const better=!cur||(kind==='assist'?w<cur.weight:w>cur.weight);
+      if(better)best[ex.name]={weight:w,reps:+s.reps||0,date:d,assist:kind==='assist'||undefined};
+    });});}
+  return Object.entries(best).map(([name,v])=>({name,weight:v.weight,reps:v.reps,date:v.date,assist:v.assist}))
     .sort((a,b)=>b.weight-a.weight);
 }
 
@@ -1369,6 +1448,7 @@ function allPRs(){
 function epley(w,r){w=+w||0;r=+r||0;if(w<=0)return 0;return w*(1+r/30);}
 /* 종목의 모든 세트에서 추정 1RM 최댓값(소수1자리 반올림). 기록 없으면 0 */
 function est1RM(name){
+  if(exKind(name)!=='normal')return 0; // 보조/유산소는 1RM 미적용
   let max=0;
   for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{if(ex.name!==name)return;
     ex.sets.forEach(s=>{const e=epley(s.weight,s.reps);if(e>max)max=e;});});}
@@ -1388,18 +1468,26 @@ function bigThree(){
    세션에서 입력한 세트(sid 일치)들의 종목별 최대 무게를, 세션 외 과거 전체 기록과
    비교해 갱신된 종목을 신기록으로 본다. 종료 정산용. */
 function sessionPRHits(sid){
-  const sessBest={};  // name -> {weight,reps}
-  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{ex.sets.forEach(s=>{
-    if(s.sid!==sid)return;const w=+s.weight||0;if(w<=0)return;
-    if(!sessBest[ex.name]||w>sessBest[ex.name].weight)sessBest[ex.name]={weight:w,reps:+s.reps||0};
-  });});}
+  const sessBest={};  // name -> {weight,reps,assist}
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    const kind=exKind(ex.name,ex);
+    if(kind==='cardio')return; // 유산소는 신기록 집계 제외
+    const isAssist=kind==='assist';
+    ex.sets.forEach(s=>{
+      if(s.sid!==sid)return;const w=+s.weight||0;if(w<=0)return;
+      const cur=sessBest[ex.name];
+      const better=!cur||(isAssist?w<cur.weight:w>cur.weight);
+      if(better)sessBest[ex.name]={weight:w,reps:+s.reps||0,assist:isAssist};
+    });});}
   const hits=[];
   for(const name in sessBest){
-    const w=sessBest[name].weight;
-    let prior=0;  // 이 세션 외(다른 sid/과거)의 최대
+    const w=sessBest[name].weight;const isAssist=sessBest[name].assist;
+    let prior=0;  // 이 세션 외(다른 sid/과거)의 일반=최대 / 보조=최저(>0)
     for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{if(ex.name!==name)return;
-      ex.sets.forEach(s=>{if(s.sid===sid)return;const pw=+s.weight||0;if(pw>prior)prior=pw;});});}
-    if(w>prior)hits.push({name,kind:'weight',value:w});
+      ex.sets.forEach(s=>{if(s.sid===sid)return;const pw=+s.weight||0;if(pw<=0)return;
+        if(isAssist){if(prior===0||pw<prior)prior=pw;}else if(pw>prior)prior=pw;});});}
+    const beat=isAssist?(prior===0||w<prior):(w>prior);
+    if(beat)hits.push({name,kind:'weight',value:w,assist:isAssist||undefined});
   }
   return hits;
 }
@@ -1408,8 +1496,8 @@ function sessionSummary(s){
   const sid=s.id;const byName={};let nSets=0,volume=0;
   for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
     const sessSets=ex.sets.filter(st=>st.sid===sid);if(!sessSets.length)return;
-    byName[ex.name]=true;
-    sessSets.forEach(st=>{nSets++;volume+=(+st.weight||0)*(+st.reps||0);});
+    byName[ex.name]=true;const isNorm=exKind(ex.name,ex)==='normal';
+    sessSets.forEach(st=>{nSets++;if(isNorm)volume+=(+st.weight||0)*(+st.reps||0);});
   });}
   return {nEx:Object.keys(byName).length,nSets,volume:Math.round(volume),
     durationSec:s.durationSec||0,prHits:s.prHits||[]};
@@ -1430,12 +1518,26 @@ function estimateCalories(durationSec,volume){
 function sessionPartStats(sid){
   const out={};PARTS.concat('기타').forEach(p=>out[p]={volume:0,sets:0});
   for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    if(exKind(ex.name,ex)!=='normal')return; // 보조/유산소는 부위별 볼륨 집계 제외
     const part=ex.part||partOf(ex.name);const key=(part in out)?part:'기타';
     ex.sets.forEach(st=>{if(st.sid!==sid)return;
       out[key].sets++;out[key].volume+=(+st.weight||0)*(+st.reps||0);});
   });}
   PARTS.concat('기타').forEach(p=>out[p].volume=Math.round(out[p].volume));
   return out;
+}
+
+/* 세션(sid)의 근력 외 활동: 유산소 분 합산 + 보조운동 종목별 최저 보조량(이번 세션).
+   인사이트 "근력 외 활동" 섹션용. 없으면 빈 배열/0. */
+function sessionExtraStats(sid){
+  let cardioMin=0;const assist={}; // name -> 이번 세션 최저 보조량(>0)
+  for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    const kind=exKind(ex.name,ex);
+    if(kind==='cardio'){ex.sets.forEach(st=>{if(st.sid!==sid)return;cardioMin+=(+st.min||0);});}
+    else if(kind==='assist'){ex.sets.forEach(st=>{if(st.sid!==sid)return;const w=+st.weight||0;if(w<=0)return;
+      if(!(ex.name in assist)||w<assist[ex.name])assist[ex.name]=w;});}
+  });}
+  return {cardioMin:Math.round(cardioMin),assist:Object.entries(assist).map(([name,w])=>({name,w}))};
 }
 
 /* 완료된(종료된) 다른 세션들의 볼륨/시간 평균과 이번 세션 비교.
@@ -1458,6 +1560,7 @@ function sessionAvgCompare(s){
 function sessionVolumeTimeline(sid){
   const pts=[];
   for(const d in DB.workouts){DB.workouts[d].forEach(ex=>{
+    if(exKind(ex.name,ex)!=='normal')return; // 보조/유산소는 볼륨 추이 제외
     ex.sets.forEach(st=>{if(st.sid!==sid||!st.doneAt)return;
       pts.push({t:st.doneAt,v:(+st.weight||0)*(+st.reps||0)});});
   });}

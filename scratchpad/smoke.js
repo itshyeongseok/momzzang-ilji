@@ -1898,6 +1898,184 @@ t('옛 데이터 호환: sleep 키 없는 백업 import 후 수면 렌더 무에
   assert.strictEqual(ev("viewTodaySleep().includes('id=\"todaySlMemo\"')"),true,'투데이 카드도 렌더');
 });
 
+/* ========== 신규(운동 타입): 보조(assist) / 유산소(cardio) ========== */
+t('EX_SEED 신규 종목 + 플래그(allEx에 어시스트/천국의계단)',()=>{
+  reset();
+  assert(ev("allEx().some(e=>e.name==='어시스트 풀업'&&e.part==='등'&&e.assist===true)"),'어시스트 풀업=등+assist');
+  assert(ev("allEx().some(e=>e.name==='어시스트 딥스'&&e.part==='가슴'&&e.assist===true)"),'어시스트 딥스=가슴+assist');
+  assert(ev("allEx().some(e=>e.name==='천국의계단'&&e.part==='유산소'&&e.cardio===true)"),'천국의계단=유산소+cardio');
+});
+
+t('exAssist/exCardio/exKind 판정(폴백 normal)',()=>{
+  reset();
+  assert.strictEqual(ev("exAssist('어시스트 풀업')"),true);
+  assert.strictEqual(ev("exCardio('천국의계단')"),true);
+  assert.strictEqual(ev("exKind('어시스트 풀업')"),'assist');
+  assert.strictEqual(ev("exKind('천국의계단')"),'cardio');
+  assert.strictEqual(ev("exKind('벤치프레스')"),'normal');
+  assert.strictEqual(ev("exKind('내맘대로운동')"),'normal','미등록 폴백 normal');
+});
+
+t('quickEx(assist): 인스턴스에 assist:true 캐시 + 일반세트',()=>{
+  reset();ev("quickEx('어시스트 풀업','등')");
+  const ex=DB().workouts['2026-06-27'][0];
+  assert.strictEqual(ex.assist,true,'인스턴스 assist 캐시');
+  assert.strictEqual(ex.cardio,undefined,'cardio 필드 없음(슬림)');
+  assert('weight' in ex.sets[0]&&'reps' in ex.sets[0],'보조는 무게/횟수 세트');
+});
+
+t('quickEx(cardio): cardio:true + min 세트(무게/횟수 없음)',()=>{
+  reset();ev("quickEx('천국의계단','유산소')");
+  const ex=DB().workouts['2026-06-27'][0];
+  assert.strictEqual(ex.cardio,true,'인스턴스 cardio 캐시');
+  assert('min' in ex.sets[0],'시간(분) 세트');
+  assert(!('weight' in ex.sets[0]),'무게 없음');
+});
+
+t('quickEx(일반): 플래그 필드 없음(undefined, 백업 슬림 유지)',()=>{
+  reset();ev("quickEx('벤치프레스')");
+  const ex=DB().workouts['2026-06-27'][0];
+  assert.strictEqual(ex.assist,undefined);
+  assert.strictEqual(ex.cardio,undefined);
+  // JSON 직렬화에 플래그 키가 안 들어가는지(바이트 불변)
+  assert(!JSON.stringify(ex).includes('assist'),'직렬화에 assist 없음');
+  assert(!JSON.stringify(ex).includes('cardio'),'직렬화에 cardio 없음');
+});
+
+t('workoutVolume: assist/cardio 세트 제외(=0 기여)',()=>{
+  reset();
+  assert.strictEqual(ev("workoutVolume([{name:'어시스트 풀업',assist:true,sets:[{weight:40,reps:8}]}])"),0,'assist 단독 0');
+  assert.strictEqual(ev("workoutVolume([{name:'천국의계단',cardio:true,sets:[{min:25}]}])"),0,'cardio 단독 0');
+  // 일반+assist 혼합: 일반분만(100*5=500)
+  assert.strictEqual(ev("workoutVolume([{name:'스쿼트',sets:[{weight:100,reps:5}]},{name:'어시스트 풀업',assist:true,sets:[{weight:40,reps:8}]}])"),500,'혼합에서 일반분만');
+});
+
+t('workoutVolume: 인스턴스 플래그 없어도 마스터 폴백으로 제외',()=>{
+  reset();
+  // 옛 데이터(플래그 미저장)지만 이름이 assist 종목 → 폴백 제외
+  assert.strictEqual(ev("workoutVolume([{name:'어시스트 딥스',sets:[{weight:30,reps:10}]}])"),0,'마스터 폴백 제외');
+});
+
+t('exerciseMaxWeight(assist): 최저 보조량(>0), cardio=0',()=>{
+  reset();
+  ev("DB.workouts['2026-06-20']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'40',reps:'8'}]}];");
+  ev("DB.workouts['2026-06-23']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'35',reps:'8'},{weight:'0',reps:''}]}];");
+  ev("DB.workouts['2026-06-25']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'45',reps:'8'}]}];save();");
+  assert.strictEqual(ev("exerciseMaxWeight('어시스트 풀업')"),35,'최저 보조량 35(0/빈값 제외)');
+  ev("DB.workouts['2026-06-26']=[{name:'천국의계단',cardio:true,sets:[{min:25}]}];save();");
+  assert.strictEqual(ev("exerciseMaxWeight('천국의계단')"),0,'cardio 무게 0');
+});
+
+t('est1RM: assist/cardio는 0(미적용)',()=>{
+  reset();
+  ev("DB.workouts['2026-06-20']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'40',reps:'8'}]},{name:'천국의계단',cardio:true,sets:[{min:25}]}];save();");
+  assert.strictEqual(ev("est1RM('어시스트 풀업')"),0,'assist 1RM 0');
+  assert.strictEqual(ev("est1RM('천국의계단')"),0,'cardio 1RM 0');
+});
+
+t('allPRs: cardio 미포함, assist는 최저 보조량+assist 플래그',()=>{
+  reset();
+  ev("DB.workouts['2026-06-20']=[{name:'스쿼트',sets:[{weight:'100',reps:'5'}]},{name:'어시스트 풀업',assist:true,sets:[{weight:'40',reps:'8'}]}];");
+  ev("DB.workouts['2026-06-23']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'35',reps:'8'}]},{name:'천국의계단',cardio:true,sets:[{min:25}]}];save();");
+  const prs=ev('allPRs()');
+  const ap=prs.find(p=>p.name==='어시스트 풀업');
+  assert(ap&&ap.assist===true&&ap.weight===35,'assist PR=최저35');
+  assert(prs.find(p=>p.name==='스쿼트').weight===100,'일반 PR 불변');
+  assert(!prs.some(p=>p.name==='천국의계단'),'cardio 제외');
+});
+
+t('일반 운동 회귀: 플래그 없는 데이터 지표 불변',()=>{
+  reset();
+  ev("DB.workouts['2026-06-27']=[{name:'벤치프레스',sets:[{weight:'80',reps:'10'},{weight:'85',reps:'5'}]}];save();");
+  assert.strictEqual(ev("workoutVolume(DB.workouts['2026-06-27'])"),80*10+85*5,'볼륨 불변');
+  assert.strictEqual(ev("exerciseMaxWeight('벤치프레스')"),85,'max 불변');
+  assert.strictEqual(ev("allPRs().find(p=>p.name==='벤치프레스').weight"),85,'PR 불변');
+  assert(ev("est1RM('벤치프레스')")>0,'1RM 정상');
+});
+
+t('cardio 분 기록 저장(setVal min)',()=>{
+  reset();ev("quickEx('천국의계단','유산소')");
+  ev("setVal(0,0,'min','25')");
+  assert.strictEqual(DB().workouts['2026-06-27'][0].sets[0].min,'25','min 저장');
+});
+
+t('setVal 토스트: assist 보조 줄이면 신기록, cardio 무토스트',()=>{
+  reset();
+  // 과거 기록(보조 40) 존재 → 오늘 35로 줄이면 신기록
+  ev("DB.workouts['2026-06-20']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'40',reps:'8'}]}];save();");
+  ev("startSession();quickEx('어시스트 풀업','등');");
+  clearSpies();
+  ev("setVal(0,0,'weight','35')"); // 보조 줄임=신기록(과거 40보다 낮음)
+  assert(toastList().some(m=>m.includes('보조 줄였')),'보조 감소 토스트');
+  clearSpies();
+  ev("setVal(0,0,'weight','50')"); // 보조 늘림=후퇴, 토스트 없음
+  assert.strictEqual(toastList().length,0,'보조 증가는 토스트 없음');
+});
+
+t('sessionPRHits: assist=보조감소 신기록, cardio 제외',()=>{
+  reset();
+  ev("DB.workouts['2026-06-20']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'40',reps:'8'}]}];save();");
+  ev("startSession();");
+  const sid=DB().settings.activeSessionId;
+  ev(`DB.workouts['2026-06-27']=[{name:'어시스트 풀업',assist:true,sets:[{weight:'35',reps:'8',sid:'${sid}'}]},{name:'천국의계단',cardio:true,sets:[{min:30,sid:'${sid}'}]}];save();`);
+  const hits=ev(`sessionPRHits('${sid}')`);
+  const ah=hits.find(h=>h.name==='어시스트 풀업');
+  assert(ah&&ah.assist===true,'보조 감소 신기록');
+  assert(!hits.some(h=>h.name==='천국의계단'),'cardio 제외');
+});
+
+t('sessionExtraStats: 유산소 분 합산 + 보조 최저량',()=>{
+  reset();ev("startSession();");
+  const sid=DB().settings.activeSessionId;
+  ev(`DB.workouts['2026-06-27']=[{name:'천국의계단',cardio:true,sets:[{min:'15',sid:'${sid}'},{min:'10',sid:'${sid}'}]},{name:'어시스트 딥스',assist:true,sets:[{weight:'30',reps:'8',sid:'${sid}'},{weight:'25',reps:'6',sid:'${sid}'}]}];save();`);
+  const ex=ev(`sessionExtraStats('${sid}')`);
+  assert.strictEqual(ex.cardioMin,25,'유산소 25분 합');
+  assert.strictEqual(ex.assist[0].name,'어시스트 딥스');
+  assert.strictEqual(ex.assist[0].w,25,'세션 최저 보조 25');
+});
+
+t('sessionSummary/sessionPartStats: assist·cardio 볼륨 제외',()=>{
+  reset();ev("startSession();");
+  const sid=DB().settings.activeSessionId;
+  ev(`DB.workouts['2026-06-27']=[{name:'스쿼트',part:'하체',sets:[{weight:'100',reps:'5',sid:'${sid}'}]},{name:'어시스트 풀업',assist:true,part:'등',sets:[{weight:'40',reps:'8',sid:'${sid}'}]},{name:'천국의계단',cardio:true,part:'유산소',sets:[{min:'20',sid:'${sid}'}]}];save();`);
+  const sum=ev(`(function(){var s=activeSession();return sessionSummary(s);})()`);
+  assert.strictEqual(sum.volume,500,'볼륨=하체 500만');
+  assert.strictEqual(sum.nEx,3,'종목수는 3(모두 셈)');
+  const ps=ev(`sessionPartStats('${sid}')`);
+  assert.strictEqual(ps['하체'].volume,500,'하체 500');
+  assert.strictEqual(ps['등'].volume,0,'보조 등 볼륨 0(오진 방지)');
+  assert.strictEqual(ps['유산소'].volume,0,'유산소 볼륨 0');
+});
+
+t('viewWorkout 렌더: assist=보조 라벨/칩, cardio=시간(분) 칸',()=>{
+  reset();
+  ev("quickEx('어시스트 풀업','등');quickEx('천국의계단','유산소');");
+  ev("setTab('workout')");
+  const v=ctx.document.getElementById('view').innerHTML;
+  assert(v.includes('보조(kg)'),'assist 무게 라벨=보조(kg)');
+  assert(v.includes('🅰 보조'),'보조 칩');
+  assert(v.includes('시간(분)'),'cardio 시간 칸 라벨');
+  assert(v.includes("setVal(1,0,'min'"),'cardio min 핸들러');
+});
+
+t('viewInsight: 근력 외 활동 섹션(유산소 분·보조)',()=>{
+  reset();ev("startSession();");
+  const sid=DB().settings.activeSessionId;
+  ev(`DB.workouts['2026-06-27']=[{name:'천국의계단',cardio:true,sets:[{min:'25',sid:'${sid}'}]},{name:'어시스트 풀업',assist:true,sets:[{weight:'30',reps:'8',sid:'${sid}'}]}];save();`);
+  const s=ev('activeSession()');ctx.__s=s;
+  const v=ev("viewInsight(__s)");
+  assert(v.includes('근력 외 활동'),'섹션 제목');
+  assert(v.includes('25분'),'유산소 분');
+  assert(v.includes('어시스트 풀업'),'보조 종목 표기');
+});
+
+t('백업 호환: 플래그 없는 옛 JSON load 후 함수 정상',()=>{
+  reset();
+  ev("DB=Object.assign(structuredClone(DEFAULT),{workouts:{'2026-06-27':[{name:'어시스트 풀업',sets:[{weight:'40',reps:'8'}]},{name:'스쿼트',sets:[{weight:'100',reps:'5'}]}]},meals:{},habits:{},body:[],settings:{}});save();");
+  assert.strictEqual(ev("workoutVolume(DB.workouts['2026-06-27'])"),500,'옛 백업도 보조 폴백 제외→500');
+  assert.strictEqual(ev("exerciseMaxWeight('어시스트 풀업')"),40,'옛 백업 보조 최저 폴백');
+});
+
 console.log('\n'+pass+' passed (sync)');
 
 /* ========== 비동기(사진 흐름): IndexedDB·압축·업로드 가드 ========== */
