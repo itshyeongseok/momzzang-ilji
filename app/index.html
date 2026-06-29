@@ -75,6 +75,7 @@ nav button.active{color:var(--accent)}
 .empty{text-align:center;color:var(--muted);padding:26px 10px;font-size:14px}
 .empty-ico{font-size:34px;line-height:1;margin-bottom:10px;opacity:.85}
 .thumb{width:46px;height:46px;border-radius:9px;object-fit:cover;background:var(--surface3);border:1px solid var(--line);cursor:pointer;flex-shrink:0}
+.mealtime{width:auto;background:var(--surface2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:3px 6px;font-size:12px;font-weight:700}
 .row{display:flex;gap:8px;align-items:center}
 .spread{display:flex;justify-content:space-between;align-items:center}
 label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 5px;font-weight:600}
@@ -1550,11 +1551,11 @@ function loadRoutine(rid){
 }
 
 /* ============ 식단 ============ */
-const MEALTYPES=['아침','점심','저녁','간식'];
 // 고형석 표준식 빠른 추가 프리셋(매번 같은 양). 원탭으로 칼로리·단백질 자동 입력.
 const MEAL_PRESETS=[
   {name:'오트밀',icon:'🥣',kcal:176,protein:9,memo:'오버나이트 오트밀 (오트밀20g+그릭요거트50g+두유60ml+블루베리20g+꿀5g)'},
-  {name:'쉐이크',icon:'🥤',kcal:216,protein:28,memo:'단백질 쉐이크 (파우더35g+두유200ml)'}
+  {name:'쉐이크',icon:'🥤',kcal:216,protein:28,memo:'단백질 쉐이크 (파우더35g+두유200ml)'},
+  {name:'바나나',icon:'🍌',kcal:105,protein:1,memo:'바나나 1개'}
 ];
 function viewMeal(){
   const list=DB.meals[cur]||[];
@@ -1562,27 +1563,22 @@ function viewMeal(){
   const prot=list.reduce((s,x)=>s+(+x.protein||0),0);
   let html=`<div class="card"><h2>🍱 식단 ${list.length?`<span class="tag">${kcal}kcal · 단백 ${prot}g</span>`:''}</h2>`;
   if(!list.length)html+=`<div class="empty"><div class="empty-ico">🍱</div>먹은 걸 기록해보세요.<br>칼로리는 몰라도 메모만 남겨도 충분해요.</div>`;
-  MEALTYPES.forEach(t=>{
-    const items=list.map((x,idx)=>({x,idx})).filter(o=>o.x.type===t);
-    if(!items.length)return;
-    html+=`<div style="margin-bottom:10px"><div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">${mealIcon(t)} ${t}</div>`;
-    items.forEach(({x,idx})=>{
-      const ph=x.photo?`<img class="thumb" data-photo="${esc(x.photo.id)}" ${x.photo.path?`data-path="${esc(x.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(x.photo.id)}','${esc(x.photo.path||'')}')" alt="식단 사진">`:'';
-      html+=`<div class="ex" style="margin-bottom:7px"><div class="spread"><div style="flex:1">
-        <div style="font-weight:600">${esc(x.memo||'(메모 없음)')}</div>
-        <div class="muted" style="font-size:12px;margin-top:2px">${x.at?'🕘 '+esc(x.at):''}${x.at&&(x.kcal||x.protein)?' · ':''}${x.kcal?x.kcal+'kcal':''}${x.protein?' · 단백 '+x.protein+'g':''}</div>
-        </div>${ph}<button class="x" onclick="delMeal(${idx})">✕</button></div></div>`;
-    });
-    html+=`</div>`;
+  // 시각(at) 순으로 나열. at 없는 옛 기록은 맨 뒤로.
+  const items=list.map((x,idx)=>({x,idx})).sort((a,b)=>(a.x.at||'99:99').localeCompare(b.x.at||'99:99'));
+  items.forEach(({x,idx})=>{
+    const ph=x.photo?`<img class="thumb" data-photo="${esc(x.photo.id)}" ${x.photo.path?`data-path="${esc(x.photo.path)}"`:''} data-photo-wrap onclick="viewPhoto('${esc(x.photo.id)}','${esc(x.photo.path||'')}')" alt="식단 사진">`:'';
+    const timeInput=`<input type="time" class="mealtime" value="${esc(x.at||'')}" onchange="setMealAt(${idx},this.value)" title="시각 수정">`;
+    html+=`<div class="ex" style="margin-bottom:7px"><div class="spread"><div style="flex:1">
+      <div style="font-weight:600">${esc(x.memo||'(메모 없음)')}</div>
+      <div class="row" style="align-items:center;gap:6px;font-size:12px;margin-top:3px">🕘 ${timeInput}
+        <span class="muted">${x.kcal?x.kcal+'kcal':''}${x.kcal&&x.protein?' · ':''}${x.protein?'단백 '+x.protein+'g':''}</span></div>
+      </div>${ph}<button class="x" onclick="delMeal(${idx})">✕</button></div></div>`;
   });
   html+=`</div>`;
   html+=`<div class="card"><h2>식단 추가</h2>
     <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">빠른 추가</div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
       ${MEAL_PRESETS.map((p,i)=>`<button class="chip" onclick="addPreset(${i})">${p.icon} ${p.name}</button>`).join('')}
-    </div>
-    <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
-      ${MEALTYPES.map((t,i)=>`<button class="chip ${i===0?'on':''}" data-mt="${t}" onclick="pickMT(this)">${mealIcon(t)} ${t}</button>`).join('')}
     </div>
     <textarea id="mealMemo" placeholder="예: 닭가슴살 200g + 고구마, 현미밥 한 공기"></textarea>
     <div class="grid2 mt8">
@@ -1598,10 +1594,7 @@ function viewMeal(){
   </div>`;
   return html;
 }
-function mealIcon(t){return {아침:'🌅',점심:'☀️',저녁:'🌙',간식:'🍪'}[t]||'🍽';}
-let curMT='아침';
 let mealPhotoPend=null;   // 추가 전 임시 보관한 선택 파일(저장 시 압축·첨부)
-function pickMT(el){curMT=el.dataset.mt;document.querySelectorAll('[data-mt]').forEach(c=>c.classList.toggle('on',c===el));}
 function pickMealPhoto(input){const f=input.files&&input.files[0];mealPhotoPend=f||null;
   const lbl=document.getElementById('mealPhotoName');if(lbl)lbl.textContent=f?'사진 1장 선택됨':'';}
 async function addMeal(){const memo=document.getElementById('mealMemo').value.trim();
@@ -1611,16 +1604,19 @@ async function addMeal(){const memo=document.getElementById('mealMemo').value.tr
   if(mealPhotoPend){try{photo=await savePhoto('meal',cur,mealPhotoPend);}catch(e){toast('사진 처리 실패');}}
   mealPhotoPend=null;
   if(!DB.meals[cur])DB.meals[cur]=[];
-  DB.meals[cur].push({type:curMT,memo,kcal,protein,photo,at:nowHM()});save();renderAll();toast(praise());
+  DB.meals[cur].push({memo,kcal,protein,photo,at:nowHM()});save();renderAll();toast(praise());
 }
-// 표준식 프리셋 원탭 추가: 현재 선택된 끼니(curMT)로 메모·kcal·protein 자동 입력.
+// 표준식 프리셋 원탭 추가: 메모·kcal·protein 자동 입력(현재 시각 기록).
 function addPreset(i){const p=MEAL_PRESETS[i];if(!p)return;
   if(!DB.meals[cur])DB.meals[cur]=[];
-  DB.meals[cur].push({type:curMT,memo:p.memo,kcal:String(p.kcal),protein:String(p.protein),photo:null,at:nowHM()});
+  DB.meals[cur].push({memo:p.memo,kcal:String(p.kcal),protein:String(p.protein),photo:null,at:nowHM()});
   save();renderAll();toast(praise());
 }
-// 식사 기록 시각(현재 'HH:MM'). 식사 타이밍 분석에 사용.
+// 식사 기록 시각(현재 'HH:MM'). 식사 타이밍 표시·정렬에 사용.
 function nowHM(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+// 식단 항목 시각 수정(나중에 올릴 때 시간 조정용). 빈 값은 무시.
+function setMealAt(i,v){const m=DB.meals[cur]&&DB.meals[cur][i];if(!m||!v)return;
+  m.at=v;save();renderAll();}
 function delMeal(i){const m=DB.meals[cur][i];if(m&&m.photo)idbDel(m.photo.id).catch(()=>{});
   DB.meals[cur].splice(i,1);if(!DB.meals[cur].length)delete DB.meals[cur];save();renderAll();}
 

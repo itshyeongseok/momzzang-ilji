@@ -19,7 +19,7 @@
 ## 데이터 모델 (`DB`)
 ```
 workouts: { 'YYYY-MM-DD': [ {name, sets:[{weight,reps}]} ] }
-meals:    { 'YYYY-MM-DD': [ {type:'아침|점심|저녁|간식', memo, kcal, protein} ] }
+meals:    { 'YYYY-MM-DD': [ {memo, kcal, protein, photo, at:'HH:MM'} ] }   // 끼니 타입 없이 시각(at) 기준. 옛 데이터의 type 필드는 무시
 habits:   { 'YYYY-MM-DD': { <habitId>: true | number } }
 habitDefs:[ {id, name, type:'check'|'num', unit?, step?, icon} ]   // 사용자 편집 가능
 body:     [ {date, weight, muscle, fat} ]
